@@ -66,7 +66,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
         with:
-          images: ${{ env.IMAGE }}
+          images: registry.docker.libis.be/library/anubis
 
       - name: Build and push
         id: build
@@ -74,12 +74,12 @@ jobs:
           npm ci
           npm run container
         env:
-          DOCKER_REPO: ${{ env.IMAGE }}
+          DOCKER_REPO: registry.docker.libis.be/library/anubis
           SLOG_LEVEL: debug
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
-          subject-name: ${{ env.IMAGE }}
+          subject-name: registry.docker.libis.be/library/anubis
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
