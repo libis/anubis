@@ -58,6 +58,7 @@ This page contains a non-exhaustive list with all websites using Anubis.
 - https://rpmfusion.org/
 - https://wiki.freepascal.org/
 - https://azurlane.koumakan.jp/
+- https://lab.civicrm.org/
 - <details>
   <summary>FreeCAD</summary>
   - https://forum.freecad.org/
@@ -116,4 +117,9 @@ This page contains a non-exhaustive list with all websites using Anubis.
   <summary>HackLab.TO</summary>
   - https://hacklab.to/
   - https://knowledge.hacklab.to/
+  </details>
+- <details>
+  <summary>Slackware</summary>
+  - https://git.slackware.nl/
+  - https://git.liveslak.org/
   </details>
