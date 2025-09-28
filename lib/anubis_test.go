@@ -299,6 +299,7 @@ func TestCookieSettings(t *testing.T) {
 		CookieDomain:      "127.0.0.1",
 		CookiePartitioned: true,
 		CookieSecure:      true,
+		CookieSameSite:    http.SameSiteNoneMode,
 		CookieExpiration:  anubis.CookieDefaultExpirationTime,
 	})
 
@@ -338,6 +339,65 @@ func TestCookieSettings(t *testing.T) {
 
 	if ckie.Secure != srv.opts.CookieSecure {
 		t.Errorf("wanted secure flag %v, got: %v", srv.opts.CookieSecure, ckie.Secure)
+	}
+	if ckie.SameSite != srv.opts.CookieSameSite {
+		t.Errorf("wanted same site option %v, got: %v", srv.opts.CookieSameSite, ckie.SameSite)
+	}
+}
+
+func TestCookieSettingsSameSiteNoneModeDowngradedToLaxWhenUnsecure(t *testing.T) {
+	pol := loadPolicies(t, "testdata/zero_difficulty.yaml", 0)
+
+	srv := spawnAnubis(t, Options{
+		Next:   http.NewServeMux(),
+		Policy: pol,
+
+		CookieDomain:      "127.0.0.1",
+		CookiePartitioned: true,
+		CookieSecure:      false,
+		CookieSameSite:    http.SameSiteNoneMode,
+		CookieExpiration:  anubis.CookieDefaultExpirationTime,
+	})
+
+	ts := httptest.NewServer(internal.RemoteXRealIP(true, "tcp", srv))
+	defer ts.Close()
+
+	cli := httpClient(t)
+	chall := makeChallenge(t, ts, cli)
+
+	resp := handleChallengeZeroDifficulty(t, ts, cli, chall)
+
+	if resp.StatusCode != http.StatusFound {
+		resp.Write(os.Stderr)
+		t.Errorf("wanted %d, got: %d", http.StatusFound, resp.StatusCode)
+	}
+
+	var ckie *http.Cookie
+	for _, cookie := range resp.Cookies() {
+		t.Logf("%#v", cookie)
+		if cookie.Name == anubis.CookieName {
+			ckie = cookie
+			break
+		}
+	}
+	if ckie == nil {
+		t.Errorf("Cookie %q not found", anubis.CookieName)
+		return
+	}
+
+	if ckie.Domain != "127.0.0.1" {
+		t.Errorf("cookie domain is wrong, wanted 127.0.0.1, got: %s", ckie.Domain)
+	}
+
+	if ckie.Partitioned != srv.opts.CookiePartitioned {
+		t.Errorf("wanted partitioned flag %v, got: %v", srv.opts.CookiePartitioned, ckie.Partitioned)
+	}
+
+	if ckie.Secure != srv.opts.CookieSecure {
+		t.Errorf("wanted secure flag %v, got: %v", srv.opts.CookieSecure, ckie.Secure)
+	}
+	if ckie.SameSite != http.SameSiteLaxMode {
+		t.Errorf("wanted same site Lax option %v, got: %v", http.SameSiteLaxMode, ckie.SameSite)
 	}
 }
 
@@ -397,7 +457,7 @@ func TestBasePrefix(t *testing.T) {
 	}{
 		{
 			name:       "no prefix",
-			basePrefix: "/",
+			basePrefix: "",
 			path:       "/.within.website/x/cmd/anubis/api/make-challenge",
 			expected:   "/.within.website/x/cmd/anubis/api/make-challenge",
 		},
@@ -439,8 +499,14 @@ func TestBasePrefix(t *testing.T) {
 			}
 
 			q := req.URL.Query()
-			q.Set("redir", tc.basePrefix)
+			redir := tc.basePrefix
+			if tc.basePrefix == "" {
+				redir = "/"
+			}
+			q.Set("redir", redir)
 			req.URL.RawQuery = q.Encode()
+
+			t.Log(req.URL.String())
 
 			// Test API endpoint with prefix
 			resp, err := cli.Do(req)
@@ -453,8 +519,15 @@ func TestBasePrefix(t *testing.T) {
 				t.Errorf("expected status code %d, got: %d", http.StatusOK, resp.StatusCode)
 			}
 
+			data, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("can't read body: %v", err)
+			}
+
+			t.Log(string(data))
+
 			var chall challengeResp
-			if err := json.NewDecoder(resp.Body).Decode(&chall); err != nil {
+			if err := json.NewDecoder(bytes.NewBuffer(data)).Decode(&chall); err != nil {
 				t.Fatalf("can't read challenge response body: %v", err)
 			}
 
@@ -475,7 +548,7 @@ func TestBasePrefix(t *testing.T) {
 				nonce++
 			}
 			elapsedTime := 420
-			redir := "/"
+			redir = "/"
 
 			cli.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse

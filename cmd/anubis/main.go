@@ -56,6 +56,7 @@ var (
 	forcedLanguage           = flag.String("forced-language", "", "if set, this language is being used instead of the one from the request's Accept-Language header")
 	hs512Secret              = flag.String("hs512-secret", "", "secret used to sign JWTs, uses ed25519 if not set")
 	cookieSecure             = flag.Bool("cookie-secure", true, "if true, sets the secure flag on Anubis cookies")
+	cookieSameSite           = flag.String("cookie-same-site", "None", "sets the same site option on Anubis cookies, will auto-downgrade None to Lax if cookie-secure is false. Valid values are None, Lax, Strict, and Default.")
 	ed25519PrivateKeyHex     = flag.String("ed25519-private-key-hex", "", "private key used to sign JWTs, if not set a random one will be assigned")
 	ed25519PrivateKeyHexFile = flag.String("ed25519-private-key-hex-file", "", "file name containing value for ed25519-private-key-hex")
 	metricsBind              = flag.String("metrics-bind", ":9090", "network address to bind metrics to")
@@ -67,7 +68,7 @@ var (
 	slogLevel                = flag.String("slog-level", "INFO", "logging level (see https://pkg.go.dev/log/slog#hdr-Levels)")
 	stripBasePrefix          = flag.Bool("strip-base-prefix", false, "if true, strips the base prefix from requests forwarded to the target server")
 	target                   = flag.String("target", "http://localhost:3923", "target to reverse proxy to, set to an empty string to disable proxying when only using auth request")
-	targetSNI                = flag.String("target-sni", "", "if set, the value of the TLS handshake hostname when forwarding requests to the target")
+	targetSNI                = flag.String("target-sni", "", "if set, TLS handshake hostname when forwarding requests to the target, if set to auto, use Host header")
 	targetHost               = flag.String("target-host", "", "if set, the value of the Host header when forwarding requests to the target")
 	targetInsecureSkipVerify = flag.Bool("target-insecure-skip-verify", false, "if true, skips TLS validation for the backend")
 	targetDisableKeepAlive   = flag.Bool("target-disable-keepalive", false, "if true, disables HTTP keep-alive for the backend")
@@ -82,6 +83,7 @@ var (
 	versionFlag              = flag.Bool("version", false, "print Anubis version")
 	publicUrl                = flag.String("public-url", "", "the externally accessible URL for this Anubis instance, used for constructing redirect URLs (e.g., for forwardAuth).")
 	xffStripPrivate          = flag.Bool("xff-strip-private", true, "if set, strip private addresses from X-Forwarded-For")
+	customRealIPHeader      = flag.String("custom-real-ip-header", "", "if set, read remote IP from header of this name (in case your environment doesn't set X-Real-IP header)")
 
 	thothInsecure        = flag.Bool("thoth-insecure", false, "if set, connect to Thoth over plain HTTP/2, don't enable this unless support told you to")
 	thothURL             = flag.String("thoth-url", "", "if set, URL for Thoth, the IP reputation database for Anubis")
@@ -141,6 +143,22 @@ func parseBindNetFromAddr(address string) (string, string) {
 		log.Fatal(fmt.Errorf("unsupported network scheme %s in address %s", bindUri.Scheme, address))
 	}
 	return "", address
+}
+
+func parseSameSite(s string) (http.SameSite) {
+    switch strings.ToLower(s) {
+    case "none":
+        return http.SameSiteNoneMode
+    case "lax":
+        return http.SameSiteLaxMode
+    case "strict":
+        return http.SameSiteStrictMode
+	case "default":
+		return http.SameSiteDefaultMode
+    default:
+        log.Fatalf("invalid cookie same-site mode: %s, valid values are None, Lax, Strict, and Default", s)
+    }
+	return http.SameSiteDefaultMode
 }
 
 func setupListener(network string, address string) (net.Listener, string) {
@@ -218,23 +236,28 @@ func makeReverseProxy(target string, targetSNI string, targetHost string, insecu
 
 	if insecureSkipVerify || targetSNI != "" {
 		transport.TLSClientConfig = &tls.Config{}
-		if insecureSkipVerify {
-			slog.Warn("TARGET_INSECURE_SKIP_VERIFY is set to true, TLS certificate validation will not be performed", "target", target)
-			transport.TLSClientConfig.InsecureSkipVerify = true
-		}
-		if targetSNI != "" {
-			transport.TLSClientConfig.ServerName = targetSNI
-		}
+	}
+	if insecureSkipVerify {
+		slog.Warn("TARGET_INSECURE_SKIP_VERIFY is set to true, TLS certificate validation will not be performed", "target", target)
+		transport.TLSClientConfig.InsecureSkipVerify = true
+	}
+	if targetSNI != "" && targetSNI != "auto" {
+		transport.TLSClientConfig.ServerName = targetSNI
 	}
 
 	rp := httputil.NewSingleHostReverseProxy(targetUri)
 	rp.Transport = transport
 
-	if targetHost != "" {
+	if targetHost != "" || targetSNI == "auto" {
 		originalDirector := rp.Director
 		rp.Director = func(req *http.Request) {
 			originalDirector(req)
-			req.Host = targetHost
+			if targetHost != "" {
+				req.Host = targetHost
+			}
+			if targetSNI == "auto" {
+				transport.TLSClientConfig.ServerName = req.Host
+			}
 		}
 	}
 
@@ -432,6 +455,7 @@ func main() {
 		WebmasterEmail:       *webmasterEmail,
 		OpenGraph:            policy.OpenGraph,
 		CookieSecure:         *cookieSecure,
+		CookieSameSite:       parseSameSite(*cookieSameSite),
 		PublicUrl:            *publicUrl,
 		JWTRestrictionHeader: *jwtRestrictionHeader,
 		DifficultyInJWT:      *difficultyInJWT,
@@ -442,6 +466,7 @@ func main() {
 
 	var h http.Handler
 	h = s
+	h = internal.CustomRealIPHeader(*customRealIPHeader, h)
 	h = internal.RemoteXRealIP(*useRemoteAddress, *bindNetwork, h)
 	h = internal.XForwardedForToXRealIP(h)
 	h = internal.XForwardedForUpdate(*xffStripPrivate, h)

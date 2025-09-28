@@ -17,6 +17,7 @@ import (
 	"github.com/TecharoHQ/anubis/lib/localization"
 	"github.com/TecharoHQ/anubis/lib/policy"
 	"github.com/TecharoHQ/anubis/web"
+	"github.com/TecharoHQ/anubis/xess"
 	"github.com/a-h/templ"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/net/publicsuffix"
@@ -29,19 +30,19 @@ var domainMatchRegexp = regexp.MustCompile(`^((xn--)?[a-z0-9]+(-[a-z0-9]+)*\.)+[
 // internal glob matcher. Matching is case-insensitive on hostnames.
 func matchRedirectDomain(allowed []string, host string) bool {
 	h := strings.ToLower(strings.TrimSpace(host))
- 	for _, pat := range allowed {
- 		p := strings.ToLower(strings.TrimSpace(pat))
- 		if strings.Contains(p, glob.GLOB) {
- 			if glob.Glob(p, h) {
- 				return true
- 			}
- 			continue
- 		}
- 		if p == h {
- 			return true
- 		}
- 	}
- 	return false
+	for _, pat := range allowed {
+		p := strings.ToLower(strings.TrimSpace(pat))
+		if strings.Contains(p, glob.GLOB) {
+			if glob.Glob(p, h) {
+				return true
+			}
+			continue
+		}
+		if p == h {
+			return true
+		}
+	}
+	return false
 }
 
 type CookieOpts struct {
@@ -56,6 +57,8 @@ func (s *Server) SetCookie(w http.ResponseWriter, cookieOpts CookieOpts) {
 	var domain = s.opts.CookieDomain
 	var name = anubis.CookieName
 	var path = "/"
+	var sameSite = s.opts.CookieSameSite
+
 	if cookieOpts.Name != "" {
 		name = cookieOpts.Name
 	}
@@ -72,11 +75,15 @@ func (s *Server) SetCookie(w http.ResponseWriter, cookieOpts CookieOpts) {
 		cookieOpts.Expiry = s.opts.CookieExpiration
 	}
 
+	if s.opts.CookieSameSite == http.SameSiteNoneMode && !s.opts.CookieSecure {
+		sameSite = http.SameSiteLaxMode
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:        name,
 		Value:       cookieOpts.Value,
 		Expires:     time.Now().Add(cookieOpts.Expiry),
-		SameSite:    http.SameSiteNoneMode,
+		SameSite:    sameSite,
 		Domain:      domain,
 		Secure:      s.opts.CookieSecure,
 		Partitioned: s.opts.CookiePartitioned,
@@ -88,6 +95,8 @@ func (s *Server) ClearCookie(w http.ResponseWriter, cookieOpts CookieOpts) {
 	var domain = s.opts.CookieDomain
 	var name = anubis.CookieName
 	var path = "/"
+	var sameSite = s.opts.CookieSameSite
+
 	if cookieOpts.Name != "" {
 		name = cookieOpts.Name
 	}
@@ -99,13 +108,16 @@ func (s *Server) ClearCookie(w http.ResponseWriter, cookieOpts CookieOpts) {
 			domain = etld
 		}
 	}
+	if s.opts.CookieSameSite == http.SameSiteNoneMode && !s.opts.CookieSecure {
+		sameSite = http.SameSiteLaxMode
+	}
 
 	http.SetCookie(w, &http.Cookie{
 		Name:        name,
 		Value:       "",
 		MaxAge:      -1,
 		Expires:     time.Now().Add(-1 * time.Minute),
-		SameSite:    http.SameSiteNoneMode,
+		SameSite:    sameSite,
 		Partitioned: s.opts.CookiePartitioned,
 		Domain:      domain,
 		Secure:      s.opts.CookieSecure,
@@ -203,7 +215,7 @@ func (s *Server) RenderIndex(w http.ResponseWriter, r *http.Request, cr policy.C
 		Store:     s.store,
 	}
 
-	component, err := impl.Issue(r, lg, in)
+	component, err := impl.Issue(w, r, lg, in)
 	if err != nil {
 		lg.Error("[unexpected] challenge component render failed, please open an issue", "err", err) // This is likely a bug in the template. Should never be triggered as CI tests for this.
 		s.respondWithError(w, r, fmt.Sprintf("%s \"RenderIndex\"", localizer.T("internal_server_error")))
@@ -268,7 +280,15 @@ func (s *Server) respondWithStatus(w http.ResponseWriter, r *http.Request, msg s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	if strings.HasPrefix(r.URL.Path, anubis.BasePrefix+anubis.StaticPath) {
+		s.mux.ServeHTTP(w, r)
+		return
+	} else if strings.HasPrefix(r.URL.Path, anubis.BasePrefix+xess.BasePrefix) {
+		s.mux.ServeHTTP(w, r)
+		return
+	}
+
+	s.maybeReverseProxyOrPage(w, r)
 }
 
 func (s *Server) stripBasePrefixFromRequest(r *http.Request) *http.Request {
