@@ -8,15 +8,15 @@ import (
 	"net/http"
 	"path/filepath"
 
-	"github.com/libis/anubis"
-	"github.com/libis/anubis/internal"
+	"github.com/TecharoHQ/anubis"
+	"github.com/TecharoHQ/anubis/internal"
 )
 
 var (
 	//go:embed *.css static
 	Static embed.FS
 
-	BasePrefix = "/.within.website/x/xess/"
+	//BasePrefix = "/.within.website/x/xess/"
 	URL        = "/.within.website/x/xess/xess.css"
 )
 
