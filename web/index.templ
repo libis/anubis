@@ -62,7 +62,7 @@ templ base(title string, body templ.Component, impressum *config.Impressum, chal
 			@templ.JSONScript("anubis_base_prefix", anubis.BasePrefix)
 			@templ.JSONScript("anubis_public_url", anubis.PublicUrl)
 		</head>
-		<body id="top">
+		<body id="top" style="--background:#ffffff;--preformatted-background:#ffffff;">
 			<main>
 				<h1 id="title" class="centered-div">{ title }</h1>
 				@body
