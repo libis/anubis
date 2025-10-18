@@ -16,12 +16,12 @@
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --background: #f9f5d7;
+    --background: #ffffff;
     --text: #1d2021;
-    --text-selection: #d3869b;
+    --text-selection: #00407D;
     --preformatted-background: #ebdbb2;
-    --link-foreground: #b16286;
-    --link-background: #fbf1c7;
+    --link-foreground: #00407D;
+    --link-background: #ffffff;
     --blockquote-border-left: 1px solid #655c54;
   }
 }
