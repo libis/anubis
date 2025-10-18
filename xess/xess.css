@@ -5,14 +5,14 @@
 
   --background: #1d2021;
   --text: #f9f5d7;
-  --text-selection: #d3869b;
+  --text-selection: #00407D;
   --preformatted-background: #3c3836;
-  --link-foreground: #b16286;
+  --link-foreground: #00407D;
   --link-background: #282828;
   --blockquote-border-left: 1px solid #bdae93;
 
-  --progress-bar-outline: #b16286 solid 4px;
-  --progress-bar-fill: #b16286;
+  --progress-bar-outline: #00407D solid 4px;
+  --progress-bar-fill: #00407D;
 }
 @media (prefers-color-scheme: light) {
   :root {
