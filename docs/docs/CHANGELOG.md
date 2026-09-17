@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- This changes the project to: -->
 
+## v1.28.0-pre2: Wuk Lamat
+
 - Add WebAssembly-based proof of work checks to decrease client load and increase the complexity required to scrape past Anubis. See [Proof of Work (WebAssembly)](./admin/configuration/challenges/wasm.mdx) for more information.
 - Use a bundled version of `wasm2js` in order to make the WebAssembly proof of work checks run in non-wasm environments.
 - Make the bundled `wasm2js`/`wasm-opt` WebAssembly modules build reproducibly and fix the build on arm64.
