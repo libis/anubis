@@ -8,6 +8,7 @@
     "fi",
     "fil",
     "fr",
+    "hr",
     "is",
     "it",
     "ja",
@@ -15,12 +16,15 @@
     "nb",
     "nl",
     "nn",
+    "pl",
     "pt-BR",
     "ru",
     "tr",
+    "uk",
     "vi",
     "zh-CN",
     "zh-TW",
-    "sv"
+    "sv",
+    "bg"
   ]
 }

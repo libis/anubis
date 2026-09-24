@@ -13,12 +13,352 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- This changes the project to: -->
 
+## v1.28.0-pre2: Wuk Lamat
+
+- Add WebAssembly-based proof of work checks to decrease client load and increase the complexity required to scrape past Anubis. See [Proof of Work (WebAssembly)](./admin/configuration/challenges/wasm.mdx) for more information.
+- Use a bundled version of `wasm2js` in order to make the WebAssembly proof of work checks run in non-wasm environments.
+- Make the bundled `wasm2js`/`wasm-opt` WebAssembly modules build reproducibly and fix the build on arm64.
+- Add the concept of [Challenge Extensions](./admin/configuration/challenges/extensions/index.mdx) and add the sample [css-load](./admin/configuration/challenges/extensions/css-load.mdx) extension.
+- Fix `npm run test:integration` so the Playwright suite can connect to browsers and Firefox can reach the test server again.
+- Add weighing rule for [Cloudflare Kitesurf](https://blog.cloudflare.com/kitesurf/). Kitesurf doesn't currently support Cookies, but it might in the future.
+- Improved Norwegian Nynorsk localization.
+- Stop clearing the authorization cookie when a challenged request did not send one. A subresource request that starts before the challenge is passed but finishes after it no longer deletes the cookie that `pass-challenge` just issued ([#1314](https://github.com/TecharoHQ/anubis/issues/1314)).
+- Fix proof of work worker spawning fallback logic to properly detect Content-Security-Policy failures and fall back to the older logic that fans out to one request per hardware core ([#1864](https://github.com/TecharoHQ/anubis/issues/1864)).
+- [Content-Security-Policy advice](./admin/configuration/content-security-policy.mdx) has been added to the documentation.
+- Passthru `Host` header as `X-Forwarded-Host` in Open Graph requests so backends can dispatch based on host.
+- Detect and block trivial attempts at [domain fronting](https://en.wikipedia.org/wiki/Domain_fronting) as bots have been starting to use that to try and turn web applications or HTTP servers into open proxies.
+- Add [HyperAgent](https://github.com/hyperbrowserai/HyperAgent/issues/91) to the headless browsers block rule.
+- Fix Dutch localization typo in the "go home" link.
+- WASM challenges now share watchdog, CSP, and defer fixes from v1.27.0.
+- WASM challenge workers now report errors to the challenge page instead of failing silently.
+- Add prebuilt binaries for NetBSD on amd64 and arm64.
+- Fix WASM build scripts on macOS, which has ancient coreutils that lacks features present on GNU+Linux.
+- Consolidate the purejs and webcrypto workers into one sha256 browser worker to avoid code duplication.
+- Rename X-Real-Ip to X-Real-I**P** in challenge metadata.
+- Fix client-supplied `X-Anubis-*` header spoofing
+- Log "challenge accepted" at INFO level when challenge is accepted, providing challenge lifecycle observability at quieter log levels than DEBUG.
+- Fix `npm run test:integration` and the Playwright CI step, which were pinned to `playwright@1.61.1` while `go.mod`'s `mxschmitt/playwright-go` had already been bumped to a client expecting protocol 1.62.x, causing every Playwright-driven test to fail with a version mismatch.
+- Restore the original `Referer` header on the request forwarded to the target after a challenge is passed, so server-side logs and analytics no longer see the internal challenge page as the referrer. Add an opt-in `--preserve-referer-query-param` flag that also appends `utm_source`/`utm_medium` query parameters to the post-challenge redirect for client-side analytics tools (e.g. Plausible) that read query parameters instead of `document.referrer`, which cannot be corrected from the server side ([#1596](https://github.com/TecharoHQ/anubis/issues/1596)).
+- Clarify getChallenge failure response and cite related log entry.
+- Share redirect validation between challenge completion and subrequest authentication. Reject ambiguous URL forms before checking allowed domains.
+- Respond with the configured `DENY` status code instead of HTTP 500 when a challenged client is rejected for not advertising gzip support, and log that rejection at `INFO` instead of `ERROR`. The rejection is deliberate, so it no longer shows up in 5xx rates or as a server fault. The log message text is unchanged, but fail2ban filters that match on the `ERROR` level need updating ([#1009](https://github.com/TecharoHQ/anubis/issues/1009)).
+
+## v1.27.0: Moenbryda Wilfsunnwyn
+
+Anubis v1.27.0 adds Windows Server support, automatically renames cookies based on settings to avoid infinite challenge loops, adds two new localizations, and more.
+
+### Breaking change: cookie names are dynamically created based on cookie settings
+
+Anubis tries to avoid breaking changes as much as possible, but sometimes we have to make them for the sake of the users. This is technically a breaking change in something that is not part of the public API of Anubis; but some administrators rely heavily on cookie names in advanced configurations.
+
+It seems that browsers store cookies disambiguated with their options. This means you can have multiple cookies named the same but with different options. Browsers will send these cookies to the server without the list of options. This means that changing any cookie settings requires you to change `COOKIE_PREFIX`, creating a new "cookie epoch" that will set things properly.
+
+In order to be more robust, Anubis will automatically change cookie names based on the cookie settings. For example, the default configuration creates cookies named `techaro.lol-anubis-auth-347ddb4a`.
+
+Without this change, changing _any_ cookie setting without every client clearing their cookies causes challenges to become an infinite loop of thrashing, making it appear that Anubis "blocked" them.
+
+If this becomes onerous in practice for administrators of HAProxy and other advanced setups that rely on cookie names, we will add an escape hatch in the policy file.
+
+### Windows Server support (beta)
+
+Anubis now publishes `.msi` packages, allowing administrators to install and run Anubis on Windows Server. Please read the [Windows Server page](./admin/environments/windows.mdx) for more information.
+
+This support is beta-grade as the Anubis team does not have a lot of experience with developing software for Windows Server. Feedback is more than welcome.
+
+Please let us know how it works for you!
+
+### Pre-release docker images no longer populate the `latest` tag
+
+Due to a misconfiguration of the GitHub Action [docker/metadata-action](https://github.com/docker/metadata-action), pre-release Docker images previously populated the `:latest` tag. This means that administrators that expected the `:latest` tag to result in a stable release of Anubis got a prerelease version suddenly when they ran automatic updates.
+
+If administrators want to opt-in to the prerelease build track of Anubis for more frequent access to new features, they can use the `:pre` tag:
+
+```yaml
+image: ghcr.io/techarohq/anubis:pre
+```
+
+### Features
+
+- Allow importing bot policy rules [using wildcard matching](./admin/configuration/import.mdx#importing-many-files-at-once) ([#1815](https://github.com/TecharoHQ/anubis/issues/1815)).
+- Add support for JSON sources to iplist2rule ([#1833](https://github.com/TecharoHQ/anubis/pull/1833))
+- Make the honeypot feature log detected addresses to the disk every minute when `honeypot.ip_log_file` is set. See the [IP address logging](./admin/honeypot/overview.mdx#ip-address-logging) section for more information.
+- Add standard library rules for making Dillo less threatening to Anubis and [document how to enable them](./admin/faq.mdx#how-do-i-allow-small-internet-browsers-like-dillo-netsurf-and-pale-moon-to-bypass-anubis).
+
+#### Crawlers
+
+- Allow [Arquivo.pt](https://arquivo.pt), the Portuguese web archive, by default via its crawling network.
+- Add `(data)/bots/lyrenth.yaml` snippet that denies [Lyrenth](https://lyrenth.com/bot)'s `AIWebIndex` crawler and `AIWebIndex-Agent` on-demand fetcher by user agent and by their [published IP ranges](https://www.lyrenth.com/bot/ip-ranges.json). This is imported by `(data)/bots/_deny-pathological.yaml`.
+- Updates Alibaba cloud IP list ([#1813](https://github.com/TecharoHQ/anubis/pull/1813))
+- Updates Googlebot IP list ([#1812](https://github.com/TecharoHQ/anubis/pull/1812))
+- Updates IP list for DuckDuckBot ([#1810](https://github.com/TecharoHQ/anubis/pull/1810))
+- Update Huawei Cloud IP list ([#1814](https://github.com/TecharoHQ/anubis/pull/1814))
+
+### Fixes
+
+- Fix bot policy imports to not require pedantically correct YAML formatting when using wildcard matching.
+- JavaScript served by the `fast` challenge is loaded using [`defer`](https://www.w3schools.com/tags/att_script_defer.asp) instead of `async` ([#1782](https://github.com/TecharoHQ/anubis/issues/1782)).
+- Amend default [Lightpanda](https://lightpanda.io/) rule to match current behaviour, add smoke test to ensure it keeps working ([#1822](https://github.com/TecharoHQ/anubis/issues/1822)).
+- Fix a panic when a request asks for the undetermined language tag, such as `Accept-Language: und` ([#1776](https://github.com/TecharoHQ/anubis/issues/1776)).
+- Allow user agents that start with capital-G `Git` in `(data)/clients/git.yaml`.
+- Enabled the Partitioned flag on cookies by default ([#1701](https://github.com/TecharoHQ/anubis/issues/1701)).
+- Fix Windows MSI builds on prerelease tags such as `v1.27.0-pre1`.
+- Bump AI-robots.txt to version 1.47.
+
+### i18n
+
+- Add Basque (eu) localization.
+- Update Bulgarian locale ([#1708](https://github.com/TecharoHQ/anubis/pull/1708))
+- Add Croatian (hr) localization.
+
+## v1.26.2: Papalymo Totolymo: Echo 2
+
+- Automatically verify correct parsing of everything in `(data)`. While doing post-release checks on v1.26.1, I discovered that I incorrectly merged `(data)/services/updown.yaml` in such a way that it became syntactically invalid. This has been mended and multiple layers of CI have been put into place to make sure that `(data)` entries are syntactically and semantically valid.
+
+## v1.26.1: Papalymo Totolymo: Echo 1
+
+- Fix support for semicolon-delimited query parameters that was dropped when moving from [net/http/httputil#ReverseProxy](https://pkg.go.dev/net/http/httputil#ReverseProxy).Director (deprecated) to net/http/httputil#ReverseProxy.Rewrite. This re-enables support for upstreams like gitweb ([#1763](https://github.com/TecharoHQ/anubis/issues/1763)). A functional test has been added to ensure this does not repeat.
+
+### Challenge page robustness
+
+The challenge page can now survive transient failures, reduces the number of requests it makes to the Anubis app, and adds exponential backoff with retries to counteract an overwhelmed server being unable to serve any assets.
+
+Previously if any request for JavaScript assets failed, the entire challenge attempt failed and users were forced to manually refresh the page, which is a bit of a bad user experience. This was made worse when the load balancer does not support HTTP/2, did not have resumable sessions enabled, and was implemented with Apache httpd pre-fork; making each asset fetch do its own TCP/TLS handshake. Under periods of heavy load such that TCP/TLS handshakes timed out, this made Anubis unable to fetch assets consistently or even made in-progress challenge attempts fail, which made challenges impossible to pass.
+
+This has been fixed in a few ways:
+
+- Fetch operations now retry with [exponential backoff](https://en.wikipedia.org/wiki/Exponential_backoff) in hopes that they will eventually be able to get through when the server is less stressed.
+- Attempting to fetch the `main.mjs` script now has fallback watchdog logic that periodically re-attempts to load the script.
+- Worker source code is fetched _once_ and then loaded into workers with a [Blob](https://developer.mozilla.org/en-US/docs/Web/API/Blob) instead of having each worker do an independent fetch of the worker source code.
+- Individual workers can now die without making the entire challenge attempt fail. Surviving workers will cover the rest of the nonce space.
+- When worker construction fails, already running proof of work workers are terminated instead of staying active as headless unmonitored infinite loops.
+- Proof of work failures are now exposed as untranslated real errors. Browsers signal script load failures with real Events so the challenge failure page now shows a useful message.
+
+## v1.26.0: Papalymo Totolymo
+
+- Add option to [disable the honeypot](./admin/policies.mdx#honeypot-configuration).
+- Add `(data)/clients/google-user-triggered-fetchers.yaml` snippet that allows Google-owned user-triggered fetchers (Google Translate's website translation proxy, Google Read Aloud, Google Messages link previews) by their [published IP ranges](https://developers.google.com/static/crawling/ipranges/user-triggered-fetchers-google.json), fixing the infinite challenge loop for visitors using Google Translate ([#444](https://github.com/TecharoHQ/anubis/issues/444))
+- Update QwantBot remote addresses range with latest value
+- Migrate check-spelling workflow config to [cspell](https://cspell.org/)
+- Add [Anubis Kubernetes Operator](https://github.com/eznix86/anubis-kubernetes-operator/) to the docs ([#1675](https://github.com/TecharoHQ/anubis/pull/1675)).
+- Bump Playwright browser tooling to 1.61.1 and playwright-go to v0.6100.0.
+- Add FreeBSD/Windows binaries to the yeetfile.
+- Add systemd system extensions to the yeetfile.
+- Set an explicit esbuild `--target=chrome66` so modern syntax (e.g. optional chaining) is transpiled down. This lowers the minimum supported browser from Chrome 80 to Chrome 66.
+- Patch [GHSA-6wcg-mqvh-fcvg](https://github.com/TecharoHQ/anubis/security/advisories/GHSA-6wcg-mqvh-fcvg) by containing subrequest logic to Anubis instances in subrequest mode.
+- Implement robot9001 style delays on the honeypot feature so that the first hit takes 1 millisecond, the second takes 2, etc.
+- Move metrics server configuration to [the policy file](./admin/policies.mdx#metrics-server).
+- Expose [pprof endpoints](https://pkg.go.dev/net/http/pprof) on the metrics listener to enable profiling Anubis in production.
+- fix: prevent nil pointer panic in challenge validation when threshold rules match during PassChallenge (#1463)
+- Instruct reverse proxies to not cache error pages.
+- Fixed mixed tab/space indentation in Caddy documentation code block
+- Improve error messages and fix broken REDIRECT_DOMAINS link in docs ([#1193](https://github.com/TecharoHQ/anubis/issues/1193))
+- Add Bulgarian locale ([#1394](https://github.com/TecharoHQ/anubis/pull/1394))
+- Fixed case-sensitivity mismatch in geoipchecker.go
+- Use [Go's native version stamping](https://michael.stapelberg.ch/posts/2026-04-05-stamp-it-all-programs-must-report-their-version/) instead of a handrolled variant.
+- Fix CEL internal errors when iterating `headers`/`query` map wrappers by implementing map iterators for `HTTPHeaders` and `URLValues` ([#1465](https://github.com/TecharoHQ/anubis/pull/1465)).
+- Enable [metrics serving via TLS](./admin/policies.mdx#tls), including [mutual TLS (mTLS)](./admin/policies.mdx#mtls).
+- Enable [HTTP basic auth](./admin/policies.mdx#http-basic-authentication) for the metrics server.
+- Fix a bug in the dataset poisoning maze that could allow denial of service [#1580](https://github.com/TecharoHQ/anubis/issues/1580).
+- Add config option to add ASN to logs/metrics.
+- Log weight when issuing challenge.
+- Block x.ai's crawler for code review training.
+- Gate pprof endpoints behind `metrics.debug` in the policy file.
+- Limit naive honeypot r9k delay to one second.
+- Fix an obscure case where adding query values to a subrequest match could cause an invalid rule match when using path based matching for protected resources.
+- Anubis now requires Go 1.26 to build.
+- Fix an edge case where load average expression values could nil pointer dereference when Anubis just started up.
+- Fix an obscure case where Anubis in subrequest mode could allow redirects to invalid domains with strange instructions.
+- Fix `path_regex` and CEL `path` rules not matching when using Traefik `forwardAuth` middleware. Anubis now checks `X-Forwarded-Uri` (Traefik) in addition to `X-Original-URI` (nginx) when resolving the request path in subrequest mode ([#1628](https://github.com/TecharoHQ/anubis/issues/1628)).
+- Validate bounds in the CEL `randInt` helper so non-positive or platform-overflowing arguments surface a typed CEL error instead of an evaluator panic.
+- Fix a race in the bbolt store where the asynchronous cleanup scheduled by an expired read could delete a value that had just been refreshed; the delete now only fires when the key still carries the same expired generation it observed.
+- Marginally increase the performances of requests processing
+- Marginally improve the performances of PoW validation
+- Marginally improve the performances of challenges generation/display
+- Significantly improve the performances of the gzip middleware
+- Significantly improve the performances of the PoW validation
+- Add trimpath option to artifact builds
+- Add COOKIE_HTTP_ONLY option to set the HttpOnly flag on Anubis cookies
+- Improve the performances of rules validation
+- Only compute the JA4H fingerprint when a policy references the `X-Http-Fingerprint-JA4H` header, taking it off the hot path for configurations that don't use it ([#834](https://github.com/TecharoHQ/anubis/pull/834)).
+- Migrate the target reverse proxy off the deprecated `httputil.ReverseProxy.Director` to `Rewrite` for Go 1.26 compatibility, preserving the inbound `Host` and `X-Forwarded-*`/`Forwarded` headers.
+
+## v1.25.0: Necron
+
+Hey all,
+
+I'm sure you've all been aware that things have been slowing down a little with Anubis development, and I want to apologize for that. A lot has been going on in my life lately (my blog will have a post out on Friday with more information), and as a result I haven't really had the energy to work on Anubis in publicly visible ways. There are things going on behind the scenes, but nothing is really shippable yet, sorry!
+
+I've also been feeling some burnout in the wake of perennial waves of anger directed towards me. I'm handling it, I'll be fine, I've just had a lot going on in my life and it's been rough.
+
+I've been missing the sense of wanderlust and discovery that comes with the artistic way I playfully develop software. I suspect that some of the stresses I've been through (setting up a complicated surgery in a country whose language you aren't fluent in is kind of an experience) have been sapping my energy. I'd gonna try to mess with things on my break, but realistically I'm probably just gonna be either watching Stargate SG-1 or doing unreasonable amounts of ocean fishing in Final Fantasy 14. Normally I'd love to keep the details about my medical state fairly private, but I'm more of a public figure now than I was this time last year so I don't really get the invisibility I'm used to for this.
+
+I've also had a fair amount of negativity directed at me for simply being much more visible than the anonymous threat actors running the scrapers that are ruining everything, which though understandable has not helped.
+
+Anyways, it all worked out and I'm about to be in the hospital for a week, so if things go really badly with this release please downgrade to the last version and/or upgrade to the main branch when the fix PR is inevitably merged. I hoped to have time to tame GPG and set up full release automation in the Anubis repo, but that didn't work out this time and that's okay.
+
+If I can challenge you all to do something, go out there and try to actually create something new somehow. Combine ideas you've never mixed before. Be creative, be human, make something purely for yourself to scratch an itch that you've always had yet never gotten around to actually mending.
+
+At the very least, try to be an example of how you want other people to act, even when you're in a situation where software written by someone else is configured to require a user agent to execute javascript to access a webpage.
+
+Be well,
+
+Xe
+
+PS: if you're well-versed in FFXIV lore, the release title should give you an idea of the kind of stuff I've been going through mentally.
+
+- Add iplist2rule tool that lets admins turn an IP address blocklist into an Anubis ruleset.
+- Add Polish locale ([#1292](https://github.com/TecharoHQ/anubis/pull/1309))
+- Fix honeypot and imprint links missing `BASE_PREFIX` when deployed behind a path prefix ([#1402](https://github.com/TecharoHQ/anubis/issues/1402))
+- Add ANEXIA Sponsor logo to docs ([#1409](https://github.com/TecharoHQ/anubis/pull/1409))
+- Improve idle performance in memory storage
+- Add HAProxy Configurations to Docs ([#1424](https://github.com/TecharoHQ/anubis/pull/1424))
+
+## v1.24.0: Y'shtola Rhul
+
+Anubis is back and better than ever! Lots of minor fixes with some big ones interspersed.
+
+- Fix panic when validating challenges after privacy-mode browsers strip headers and the follow-up request matches an `ALLOW` threshold.
+- Expose WEIGHT rule matches as Prometheus metrics.
+- Allow more OCI registry clients [based on feedback](https://github.com/TecharoHQ/anubis/pull/1253#issuecomment-3506744184).
+- Expose services directory in the embedded `(data)` filesystem.
+- Add Ukrainian locale ([#1044](https://github.com/TecharoHQ/anubis/pull/1044)).
+- Allow Renovate as an OCI registry client.
+- Properly handle 4in6 addresses so that IP matching works with those addresses.
+- Add support to simple Valkey/Redis cluster mode
+- Open Graph passthrough now reuses the configured target Host/SNI/TLS settings, so metadata fetches succeed when the upstream certificate differs from the public domain. ([1283](https://github.com/TecharoHQ/anubis/pull/1283))
+- Stabilize the CVE-2025-24369 regression test by always submitting an invalid proof instead of relying on random POW failures.
+- Refine the check that ensures the presence of the Accept header to avoid breaking docker clients.
+- Removed rules intended to reward actual browsers due to abuse in the wild.
+
+### Dataset poisoning
+
+Anubis has the ability to engage in [dataset poisoning attacks](https://www.anthropic.com/research/small-samples-poison) using the [dataset poisoning subsystem](./admin/honeypot/overview.mdx). This allows every Anubis instance to be a honeypot to attract and flag abusive scrapers so that no administrator action is required to ban them.
+
+There is much more information about this feature in [the dataset poisoning subsystem documentation](./admin/honeypot/overview.mdx). Administrators that are interested in learning how this feature works should consult that documentation.
+
+### Deprecate `report_as` in challenge configuration
+
+Previously Anubis let you lie to users about the difficulty of a challenge to interfere with operators of malicious scrapers as a psychological attack:
+
+```yaml
+bots:
+  # Punish any bot with "bot" in the user-agent string
+  # This is known to have a high false-positive rate, use at your own risk
+  - name: generic-bot-catchall
+    user_agent_regex: (?i:bot|crawler)
+    action: CHALLENGE
+    challenge:
+      difficulty: 16 # impossible
+      report_as: 4 # lie to the operator
+      algorithm: slow # intentionally waste CPU cycles and time
+```
+
+This has turned out to be a bad idea because it has caused massive user experience problems and has been removed. If you are using this setting, you will get a warning in your logs like this:
+
+```json
+{
+  "time": "2025-11-25T23:10:31.092201549-05:00",
+  "level": "WARN",
+  "source": {
+    "function": "github.com/TecharoHQ/anubis/lib/policy.ParseConfig",
+    "file": "/home/xe/code/TecharoHQ/anubis/lib/policy/policy.go",
+    "line": 201
+  },
+  "msg": "use of deprecated report_as setting detected, please remove this from your policy file when possible",
+  "at": "config-validate",
+  "name": "mild-suspicion"
+}
+```
+
+To remove this warning, remove this setting from your policy file.
+
+### Logging customization
+
+Anubis now supports the ability to log to multiple backends ("sinks"). This allows you to have Anubis [log to a file](./admin/policies.mdx#file-sink) instead of just logging to standard out. You can also customize the [logging level](./admin/policies.mdx#log-levels) in the policy file:
+
+```yaml
+logging:
+  level: "warn" # much less verbose logging
+  sink: file # log to a file
+  parameters:
+    file: "./var/anubis.log"
+    maxBackups: 3 # keep at least 3 old copies
+    maxBytes: 67108864 # each file can have up to 64 Mi of logs
+    maxAge: 7 # rotate files out every n days
+    oldFileTimeFormat: 2006-01-02T15-04-05 # RFC 3339-ish
+    compress: true # gzip-compress old log files
+    useLocalTime: false # timezone for rotated files is UTC
+```
+
+Additionally, information about [how Anubis uses each logging level](./admin/policies.mdx#log-levels) has been added to the documentation.
+
+### DNS Features
+
+- CEL expressions for:
+  - FCrDNS checks
+  - Forward DNS queries
+  - Reverse DNS queries
+  - `arpaReverseIP` to transform IPv4/6 addresses into ARPA reverse IP notation.
+  - `regexSafe` to escape regex special characters (useful for including `remoteAddress` or headers in regular expressions).
+- DNS cache and other optimizations to minimize unnecessary DNS queries.
+
+The DNS cache TTL can be changed in the bots config like this:
+
+```yaml
+dns_ttl:
+  forward: 600
+  reverse: 600
+```
+
+The default value for both forward and reverse queries is 300 seconds.
+
+The `verifyFCrDNS` CEL function has two overloads:
+
+- `(addr)`
+  Simply verifies that the remote side has PTR records pointing to the target address.
+- `(addr, ptrPattern)`
+  Verifies that the remote side refers to a specific domain and that this domain points to the target IP.
+
+## v1.23.1: Lyse Hext - Echo 1
+
+- Fix `SERVE_ROBOTS_TXT` setting after the double slash fix broke it.
+
+### Potentially breaking changes
+
+#### Remove default Tencent Cloud block rule
+
+v1.23.0 added a default rule to block Tencent Cloud. After an email from their abuse team where they promised to take action to clean up their reputation, I have removed the default block rule. If this network causes you problems, please contact [abuse@tencent.com](mailto:abuse@tencent.com) and supply the following information:
+
+- Time of abusive requests.
+- IP address, User-Agent header, or other unique identifiers that can help the abuse team educate the customer about their misbehaving infrastructure.
+- Does the abusive IP address request robots.txt? If not, be sure to include that information.
+- A brief description of the impact to your system such as high system load, pages not rendering, or database system crashes. This helps the provider establish the fact that their customer is causing you measurable harm.
+- Context as to what your service is, what it does, and why they should care.
+
+Mention that you are using Anubis or BotStopper to protect your services. If they do not respond to you, please [contact me](https://xeiaso.net/contact) as soon as possible.
+
+#### Docker / OCI registry clients
+
+Anubis v1.23.0 accidentally blocked Docker / OCI registry clients. In order to explicitly allow them, add an import for `(data)/clients/docker-client.yaml`:
+
+```yaml
+bots:
+  - import: (data)/meta/default-config.yaml
+  - import: (data)/clients/docker-client.yaml
+```
+
+This is technically a regression as these clients used to work in Anubis v1.22.0, however it is allowable to make this opt-in as most websites do not expect to be serving Docker / OCI registry client traffic.
+
+## v1.23.0: Lyse Hext
+
+- Add default tencent cloud DENY rule.
 - Added `(data)/meta/default-config.yaml` for importing the entire default configuration at once.
 - Add `-custom-real-ip-header` flag to get the original request IP from a different header than `x-real-ip`.
 - Add `contentLength` variable to bot expressions.
 - Add `COOKIE_SAME_SITE_MODE` to force anubis cookies SameSite value, and downgrade automatically from `None` to `Lax` if cookie is insecure.
 - Fix lock convoy problem in decaymap ([#1103](https://github.com/TecharoHQ/anubis/issues/1103)).
 - Fix lock convoy problem in bbolt by implementing the actor pattern ([#1103](https://github.com/TecharoHQ/anubis/issues/1103)).
+- Remove bbolt actorify implementation due to causing production issues.
 - Document missing environment variables in installation guide: `SLOG_LEVEL`, `COOKIE_PREFIX`, `FORCED_LANGUAGE`, and `TARGET_DISABLE_KEEPALIVE` ([#1086](https://github.com/TecharoHQ/anubis/pull/1086)).
 - Add validation warning when persistent storage is used without setting signing keys.
 - Fixed `robots2policy` to properly group consecutive user agents into `any:` instead of only processing the last one ([#925](https://github.com/TecharoHQ/anubis/pull/925)).
@@ -36,6 +376,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow multiple consecutive slashes in a row in application paths ([#754](https://github.com/TecharoHQ/anubis/issues/754)).
 - Add option to set `targetSNI` to special keyword 'auto' to indicate that it should be automatically set to the request Host name ([424](https://github.com/TecharoHQ/anubis/issues/424)).
 - The Preact challenge has been removed from the default configuration. It will be deprecated in the future.
+- An open redirect when in subrequest mode has been fixed.
+
+### Potentially breaking changes
+
+#### Multiple checks at once has and-like semantics instead of or-like semantics
+
+Anubis lets you stack multiple checks at once with blocks like this:
+
+```yaml
+name: allow-prometheus
+action: ALLOW
+user_agent_regex: ^prometheus-probe$
+remote_addresses:
+  - 192.168.2.0/24
+```
+
+Previously, this only returned ALLOW if _any one_ of the conditions matched. This behaviour has changed to only return ALLOW if _all_ of the conditions match. I expect this to have some issues with user configs, however this fix is grave enough that it's worth the risk of breaking configs. If this bites you, please let me know so we can make an escape hatch.
+
+### Better error messages
+
+In order to make it easier for legitimate clients to debug issues with their browser configuration and Anubis, Anubis will emit internal error detail in base 64 so that administrators can chase down issues. Future versions of this may also include a variant that encrypts the error detail messages.
 
 ### Bug Fixes
 
@@ -214,7 +575,7 @@ Anubis now is able to store things persistently [in memory](./admin/policies.mdx
 
 Anubis now supports localized responses. Locales can be added in [lib/localization/locales/](https://github.com/TecharoHQ/anubis/tree/main/lib/localization/locales). This release includes support for the following languages:
 
-- [Brazilian Portugese](https://github.com/TecharoHQ/anubis/pull/726)
+- [Brazilian Portuguese](https://github.com/TecharoHQ/anubis/pull/726)
 - [Chinese (Simplified)](https://github.com/TecharoHQ/anubis/pull/774)
 - [Chinese (Traditional)](https://github.com/TecharoHQ/anubis/pull/759)
 - English
@@ -686,7 +1047,7 @@ Livia sas Junius: Echo 2
 
 Livia sas Junius: Echo 1
 
-- Set the `X-Real-Ip` header based on the contents of `X-Forwarded-For`
+- Set the `X-Real-IP` header based on the contents of `X-Forwarded-For`
   [#62](https://github.com/TecharoHQ/anubis/issues/62)
 
 ## v1.14.0

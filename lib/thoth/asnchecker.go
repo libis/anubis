@@ -41,15 +41,15 @@ func (asnc *ASNChecker) Check(r *http.Request) (bool, error) {
 	defer cancel()
 
 	ipInfo, err := asnc.iptoasn.Lookup(ctx, &iptoasnv1.LookupRequest{
-		IpAddress: r.Header.Get("X-Real-Ip"),
+		IpAddress: r.Header.Get("X-Real-IP"),
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
-			slog.Debug("error contacting thoth", "err", err, "actionable", false)
+			slog.DebugContext(r.Context(), "error contacting thoth", "err", err, "actionable", false)
 			return false, nil
 		default:
-			slog.Error("error contacting thoth, please contact support", "err", err, "actionable", true)
+			slog.ErrorContext(r.Context(), "error contacting thoth, please contact support", "err", err, "actionable", true)
 			return false, nil
 		}
 	}

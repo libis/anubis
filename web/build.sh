@@ -41,16 +41,16 @@ cp ../lib/localization/locales/*.json static/locales/
 
 shopt -s nullglob globstar
 
-for file in js/**/*.ts js/**/*.mjs; do
-  out="static/${file}"
-  if [[ "$file" == *.ts ]]; then
-    out="static/${file%.ts}.mjs"
-  fi
+for file in js/*.ts js/worker/*.ts; do
+	out="static/${file}"
+	if [[ "$file" == *.ts ]]; then
+		out="static/${file%.ts}.mjs"
+	fi
 
-  mkdir -p "$(dirname "$out")"
+	mkdir -p "$(dirname "$out")"
 
-  esbuild "$file" --sourcemap --bundle --minify --outfile="$out" --banner:js="$LICENSE"
-  gzip -f -k -n "$out"
-  zstd -f -k --ultra -22 "$out"
-  brotli -fZk "$out"
+	esbuild "$file" --sourcemap --bundle --minify --target=chrome66 --outfile="$out" --banner:js="$LICENSE"
+	gzip -f -k -n "$out"
+	zstd -f -k --ultra -22 "$out"
+	brotli -fZk "$out"
 done

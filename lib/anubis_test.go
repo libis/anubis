@@ -2,6 +2,7 @@ package lib
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,8 +19,10 @@ import (
 	"github.com/TecharoHQ/anubis"
 	"github.com/TecharoHQ/anubis/data"
 	"github.com/TecharoHQ/anubis/internal"
+	"github.com/TecharoHQ/anubis/lib/challenge"
+	"github.com/TecharoHQ/anubis/lib/config"
 	"github.com/TecharoHQ/anubis/lib/policy"
-	"github.com/TecharoHQ/anubis/lib/policy/config"
+	"github.com/TecharoHQ/anubis/lib/store"
 	"github.com/TecharoHQ/anubis/lib/thoth/thothmock"
 )
 
@@ -35,8 +38,8 @@ func NewTLogWriter(t *testing.T) io.Writer {
 
 // Write splits input on newlines and logs each line separately.
 func (w *TLogWriter) Write(p []byte) (n int, err error) {
-	lines := strings.Split(string(p), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(p), "\n")
+	for line := range lines {
 		if line != "" {
 			w.t.Log(line)
 		}
@@ -55,7 +58,7 @@ func loadPolicies(t *testing.T, fname string, difficulty int) *policy.ParsedConf
 
 	t.Logf("loading policy file: %s", fname)
 
-	anubisPolicy, err := LoadPoliciesOrDefault(ctx, fname, difficulty)
+	anubisPolicy, err := LoadPoliciesOrDefault(ctx, fname, difficulty, "info", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +107,7 @@ func makeChallenge(t *testing.T, ts *httptest.Server, cli *http.Client) challeng
 	if err != nil {
 		t.Fatalf("can't request challenge: %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	var chall challengeResp
 	if err := json.NewDecoder(resp.Body).Decode(&chall); err != nil {
@@ -149,10 +152,34 @@ func handleChallengeZeroDifficulty(t *testing.T, ts *httptest.Server, cli *http.
 	return resp
 }
 
+func handleChallengeInvalidProof(t *testing.T, ts *httptest.Server, cli *http.Client, chall challengeResp) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/.within.website/x/cmd/anubis/api/pass-challenge", nil)
+	if err != nil {
+		t.Fatalf("can't make request: %v", err)
+	}
+
+	q := req.URL.Query()
+	q.Set("response", strings.Repeat("f", 64)) // "hash" that never starts with the nonce
+	q.Set("nonce", "0")
+	q.Set("redir", "/")
+	q.Set("elapsedTime", "0")
+	q.Set("id", chall.ID)
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := cli.Do(req)
+	if err != nil {
+		t.Fatalf("can't do request: %v", err)
+	}
+
+	return resp
+}
+
 type loggingCookieJar struct {
 	t       *testing.T
-	lock    sync.Mutex
 	cookies map[string][]*http.Cookie
+	lock    sync.Mutex
 }
 
 func (lcj *loggingCookieJar) Cookies(u *url.URL) []*http.Cookie {
@@ -221,9 +248,9 @@ func TestLoadPolicies(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer fin.Close()
+			defer fin.Close() //nolint:errcheck
 
-			if _, err := policy.ParseConfig(t.Context(), fin, fname, 4); err != nil {
+			if _, err := policy.ParseConfig(t.Context(), fin, fname, 4, "info", false); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -244,7 +271,7 @@ func TestCVE2025_24369(t *testing.T) {
 
 	cli := httpClient(t)
 	chall := makeChallenge(t, ts, cli)
-	resp := handleChallengeZeroDifficulty(t, ts, cli, chall)
+	resp := handleChallengeInvalidProof(t, ts, cli, chall)
 
 	if resp.StatusCode == http.StatusFound {
 		t.Log("Regression on CVE-2025-24369")
@@ -252,159 +279,205 @@ func TestCVE2025_24369(t *testing.T) {
 	}
 }
 
-func TestCookieCustomExpiration(t *testing.T) {
-	pol := loadPolicies(t, "testdata/zero_difficulty.yaml", 0)
-	ckieExpiration := 10 * time.Minute
-
-	srv := spawnAnubis(t, Options{
-		Next:   http.NewServeMux(),
-		Policy: pol,
-
-		CookieExpiration: ckieExpiration,
-	})
-
-	ts := httptest.NewServer(internal.RemoteXRealIP(true, "tcp", srv))
-	defer ts.Close()
-
-	cli := httpClient(t)
-	chall := makeChallenge(t, ts, cli)
-
-	resp := handleChallengeZeroDifficulty(t, ts, cli, chall)
-
-	if resp.StatusCode != http.StatusFound {
-		resp.Write(os.Stderr)
-		t.Errorf("wanted %d, got: %d", http.StatusFound, resp.StatusCode)
-	}
-
-	var ckie *http.Cookie
-	for _, cookie := range resp.Cookies() {
-		t.Logf("%#v", cookie)
-		if cookie.Name == anubis.CookieName {
-			ckie = cookie
-			break
-		}
-	}
-	if ckie == nil {
-		t.Errorf("Cookie %q not found", anubis.CookieName)
-		return
-	}
-}
-
 func TestCookieSettings(t *testing.T) {
-	pol := loadPolicies(t, "testdata/zero_difficulty.yaml", 0)
+	const cookieDomain = "127.0.0.1"
 
-	srv := spawnAnubis(t, Options{
-		Next:   http.NewServeMux(),
-		Policy: pol,
-
-		CookieDomain:      "127.0.0.1",
-		CookiePartitioned: true,
-		CookieSecure:      true,
-		CookieSameSite:    http.SameSiteNoneMode,
-		CookieExpiration:  anubis.CookieDefaultExpirationTime,
-	})
-
-	ts := httptest.NewServer(internal.RemoteXRealIP(true, "tcp", srv))
-	defer ts.Close()
-
-	cli := httpClient(t)
-	chall := makeChallenge(t, ts, cli)
-
-	resp := handleChallengeZeroDifficulty(t, ts, cli, chall)
-
-	if resp.StatusCode != http.StatusFound {
-		resp.Write(os.Stderr)
-		t.Errorf("wanted %d, got: %d", http.StatusFound, resp.StatusCode)
+	testCases := []struct {
+		name         string
+		partitioned  bool
+		secure       bool
+		httpOnly     bool
+		sameSite     http.SameSite
+		wantSameSite http.SameSite
+		expiration   time.Duration
+	}{
+		{
+			name:         "secure samesite none is preserved",
+			partitioned:  true,
+			secure:       true,
+			httpOnly:     false,
+			sameSite:     http.SameSiteNoneMode,
+			wantSameSite: http.SameSiteNoneMode,
+			expiration:   anubis.CookieDefaultExpirationTime,
+		},
+		{
+			name:         "secure samesite none with httponly is preserved",
+			partitioned:  true,
+			secure:       true,
+			httpOnly:     true,
+			sameSite:     http.SameSiteNoneMode,
+			wantSameSite: http.SameSiteNoneMode,
+			expiration:   anubis.CookieDefaultExpirationTime,
+		},
+		{
+			name:         "insecure samesite none downgrades to lax",
+			partitioned:  true,
+			secure:       false,
+			httpOnly:     false,
+			sameSite:     http.SameSiteNoneMode,
+			wantSameSite: http.SameSiteLaxMode,
+			expiration:   anubis.CookieDefaultExpirationTime,
+		},
+		{
+			name:         "insecure samesite lax with httponly is preserved",
+			partitioned:  false,
+			secure:       false,
+			httpOnly:     true,
+			sameSite:     http.SameSiteLaxMode,
+			wantSameSite: http.SameSiteLaxMode,
+			expiration:   anubis.CookieDefaultExpirationTime,
+		},
+		{
+			name:         "custom expiration is honored",
+			partitioned:  false,
+			secure:       true,
+			httpOnly:     false,
+			sameSite:     http.SameSiteLaxMode,
+			wantSameSite: http.SameSiteLaxMode,
+			expiration:   10 * time.Minute,
+		},
 	}
 
-	var ckie *http.Cookie
-	for _, cookie := range resp.Cookies() {
-		t.Logf("%#v", cookie)
-		if cookie.Name == anubis.CookieName {
-			ckie = cookie
-			break
-		}
-	}
-	if ckie == nil {
-		t.Errorf("Cookie %q not found", anubis.CookieName)
-		return
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// load per subtest: New() mutates the policy (appends the
+			// honeypot bot), so sharing one instance leaks state across cases
+			pol := loadPolicies(t, "testdata/zero_difficulty.yaml", 0)
 
-	if ckie.Domain != "127.0.0.1" {
-		t.Errorf("cookie domain is wrong, wanted 127.0.0.1, got: %s", ckie.Domain)
-	}
+			srv := spawnAnubis(t, Options{
+				Next:   http.NewServeMux(),
+				Policy: pol,
 
-	if ckie.Partitioned != srv.opts.CookiePartitioned {
-		t.Errorf("wanted partitioned flag %v, got: %v", srv.opts.CookiePartitioned, ckie.Partitioned)
-	}
+				CookieDomain:      cookieDomain,
+				CookiePartitioned: tc.partitioned,
+				CookieSecure:      tc.secure,
+				CookieHttpOnly:    tc.httpOnly,
+				CookieSameSite:    tc.sameSite,
+				CookieExpiration:  tc.expiration,
+			})
 
-	if ckie.Secure != srv.opts.CookieSecure {
-		t.Errorf("wanted secure flag %v, got: %v", srv.opts.CookieSecure, ckie.Secure)
-	}
-	if ckie.SameSite != srv.opts.CookieSameSite {
-		t.Errorf("wanted same site option %v, got: %v", srv.opts.CookieSameSite, ckie.SameSite)
+			ts := httptest.NewServer(internal.RemoteXRealIP(true, "tcp", srv))
+			defer ts.Close()
+
+			cli := httpClient(t)
+			chall := makeChallenge(t, ts, cli)
+
+			resp := handleChallengeZeroDifficulty(t, ts, cli, chall)
+
+			if resp.StatusCode != http.StatusFound {
+				_ = resp.Write(os.Stderr) // if this fails we have bigger problems
+				t.Errorf("wanted %d, got: %d", http.StatusFound, resp.StatusCode)
+			}
+
+			wantCookieName := srv.cookieName(anubis.CookieName)
+
+			var ckie *http.Cookie
+			for _, cookie := range resp.Cookies() {
+				t.Logf("%#v", cookie)
+				if cookie.Name == wantCookieName {
+					ckie = cookie
+					break
+				}
+			}
+			if ckie == nil {
+				t.Errorf("Cookie %q not found", wantCookieName)
+				return
+			}
+
+			if ckie.Domain != cookieDomain {
+				t.Errorf("cookie domain is wrong, wanted %s, got: %s", cookieDomain, ckie.Domain)
+			}
+			if ckie.Partitioned != tc.partitioned {
+				t.Errorf("wanted partitioned flag %v, got: %v", tc.partitioned, ckie.Partitioned)
+			}
+			if ckie.HttpOnly != tc.httpOnly {
+				t.Errorf("wanted httponly flag %v, got: %v", tc.httpOnly, ckie.HttpOnly)
+			}
+			if ckie.Secure != tc.secure {
+				t.Errorf("wanted secure flag %v, got: %v", tc.secure, ckie.Secure)
+			}
+			if ckie.SameSite != tc.wantSameSite {
+				t.Errorf("wanted same site option %v, got: %v", tc.wantSameSite, ckie.SameSite)
+			}
+			if got := time.Until(ckie.Expires); (got - tc.expiration).Abs() > time.Minute {
+				t.Errorf("cookie expiry is wrong, wanted ~%s remaining, got: %s", tc.expiration, got)
+			}
+		})
 	}
 }
 
-func TestCookieSettingsSameSiteNoneModeDowngradedToLaxWhenUnsecure(t *testing.T) {
-	pol := loadPolicies(t, "testdata/zero_difficulty.yaml", 0)
-
+// Regression test for https://github.com/TecharoHQ/anubis/issues/1314
+//
+// A request without an Anubis cookie must not answer with a Set-Cookie that
+// clears it. Browsers issue subresource requests in parallel with the
+// challenge, so such a response can land after pass-challenge has already
+// issued a valid cookie and would delete it. A request that does carry a
+// cookie Anubis rejects must still have it cleared.
+func TestChallengeDoesNotClearAbsentCookie(t *testing.T) {
 	srv := spawnAnubis(t, Options{
 		Next:   http.NewServeMux(),
-		Policy: pol,
-
-		CookieDomain:      "127.0.0.1",
-		CookiePartitioned: true,
-		CookieSecure:      false,
-		CookieSameSite:    http.SameSiteNoneMode,
-		CookieExpiration:  anubis.CookieDefaultExpirationTime,
+		Policy: loadPolicies(t, "testdata/zero_difficulty.yaml", 0),
 	})
 
 	ts := httptest.NewServer(internal.RemoteXRealIP(true, "tcp", srv))
-	defer ts.Close()
+	t.Cleanup(ts.Close)
 
-	cli := httpClient(t)
-	chall := makeChallenge(t, ts, cli)
+	cookieName := srv.cookieName(anubis.CookieName)
 
-	resp := handleChallengeZeroDifficulty(t, ts, cli, chall)
+	for _, tc := range []struct {
+		name      string
+		cookie    *http.Cookie
+		wantClear bool
+	}{
+		{
+			name:      "absent cookie is left alone",
+			cookie:    nil,
+			wantClear: false,
+		},
+		{
+			name:      "unparseable token is cleared",
+			cookie:    &http.Cookie{Name: cookieName, Value: "not-a-jwt"},
+			wantClear: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+			if err != nil {
+				t.Fatalf("can't make request: %v", err)
+			}
 
-	if resp.StatusCode != http.StatusFound {
-		resp.Write(os.Stderr)
-		t.Errorf("wanted %d, got: %d", http.StatusFound, resp.StatusCode)
-	}
+			if tc.cookie != nil {
+				req.AddCookie(tc.cookie)
+			}
 
-	var ckie *http.Cookie
-	for _, cookie := range resp.Cookies() {
-		t.Logf("%#v", cookie)
-		if cookie.Name == anubis.CookieName {
-			ckie = cookie
-			break
-		}
-	}
-	if ckie == nil {
-		t.Errorf("Cookie %q not found", anubis.CookieName)
-		return
-	}
+			resp, err := httpClient(t).Do(req)
+			if err != nil {
+				t.Fatalf("can't do request: %v", err)
+			}
+			t.Cleanup(func() { resp.Body.Close() }) //nolint:errcheck
 
-	if ckie.Domain != "127.0.0.1" {
-		t.Errorf("cookie domain is wrong, wanted 127.0.0.1, got: %s", ckie.Domain)
-	}
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("wanted the challenge page with status %d, got: %d", http.StatusOK, resp.StatusCode)
+			}
 
-	if ckie.Partitioned != srv.opts.CookiePartitioned {
-		t.Errorf("wanted partitioned flag %v, got: %v", srv.opts.CookiePartitioned, ckie.Partitioned)
-	}
+			var cleared bool
+			for _, ckie := range resp.Cookies() {
+				t.Logf("%#v", ckie)
+				if ckie.Name == cookieName && ckie.MaxAge < 0 {
+					cleared = true
+				}
+			}
 
-	if ckie.Secure != srv.opts.CookieSecure {
-		t.Errorf("wanted secure flag %v, got: %v", srv.opts.CookieSecure, ckie.Secure)
-	}
-	if ckie.SameSite != http.SameSiteLaxMode {
-		t.Errorf("wanted same site Lax option %v, got: %v", http.SameSiteLaxMode, ckie.SameSite)
+			if cleared != tc.wantClear {
+				t.Errorf("wanted cookie %q cleared: %v, got: %v", cookieName, tc.wantClear, cleared)
+			}
+		})
 	}
 }
 
 func TestCheckDefaultDifficultyMatchesPolicy(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "OK")
+		fmt.Fprintln(w, "OK") //nolint:errcheck
 	})
 
 	for i := 1; i < 10; i++ {
@@ -425,7 +498,7 @@ func TestCheckDefaultDifficultyMatchesPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			req.Header.Add("X-Real-Ip", "127.0.0.1")
+			req.Header.Add("X-Real-IP", "127.0.0.1")
 
 			cr, bot, err := s.check(req, s.logger)
 			if err != nil {
@@ -437,17 +510,13 @@ func TestCheckDefaultDifficultyMatchesPolicy(t *testing.T) {
 			if bot.Challenge.Difficulty != i {
 				t.Errorf("Challenge.Difficulty is wrong, wanted %d, got: %d", i, bot.Challenge.Difficulty)
 			}
-
-			if bot.Challenge.ReportAs != i {
-				t.Errorf("Challenge.ReportAs is wrong, wanted %d, got: %d", i, bot.Challenge.ReportAs)
-			}
 		})
 	}
 }
 
 func TestBasePrefix(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "OK")
+		fmt.Fprintln(w, "OK") //nolint:errcheck
 	})
 
 	testCases := []struct {
@@ -514,7 +583,11 @@ func TestBasePrefix(t *testing.T) {
 			if err != nil {
 				t.Fatalf("can't request challenge: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}()
 
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("expected status code %d, got: %d", http.StatusOK, resp.StatusCode)
@@ -588,15 +661,17 @@ func TestBasePrefix(t *testing.T) {
 			}
 
 			// Check cookie path
+			wantCookieName := srv.cookieName(anubis.CookieName)
+
 			var ckie *http.Cookie
 			for _, cookie := range resp.Cookies() {
-				if cookie.Name == anubis.CookieName {
+				if cookie.Name == wantCookieName {
 					ckie = cookie
 					break
 				}
 			}
 			if ckie == nil {
-				t.Errorf("Cookie %q not found", anubis.CookieName)
+				t.Errorf("Cookie %q not found", wantCookieName)
 				return
 			}
 
@@ -616,7 +691,7 @@ func TestCustomStatusCodes(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Log(r.UserAgent())
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "OK")
+		fmt.Fprintln(w, "OK") //nolint:errcheck
 	})
 
 	statusMap := map[string]int{
@@ -656,13 +731,148 @@ func TestCustomStatusCodes(t *testing.T) {
 	}
 }
 
+func TestNonGzipClientGetsDenyStatus(t *testing.T) {
+	pol := loadPolicies(t, "testdata/aggressive_403.yaml", 0)
+
+	srv := spawnAnubis(t, Options{
+		Next:   http.NewServeMux(),
+		Policy: pol,
+	})
+
+	var logs bytes.Buffer
+	srv.logger = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	const requests = 4096
+
+	var challenged, denied int
+
+	for i := 0; i < requests; i++ {
+		req := httptest.NewRequest("GET", "http://example.com/", nil)
+		req.Header.Set("X-Real-IP", "127.0.0.1")
+		req.Header.Set("User-Agent", "CHALLENGE")
+		req.Header.Set("Accept-Encoding", "br")
+
+		w := httptest.NewRecorder()
+		srv.maybeReverseProxyOrPage(w, req)
+
+		switch w.Code {
+		case pol.StatusCodes.Challenge:
+			challenged++
+		case pol.StatusCodes.Deny:
+			denied++
+		default:
+			t.Fatalf("request %d: got status %d, wanted %d (challenge) or %d (deny)", i, w.Code, pol.StatusCodes.Challenge, pol.StatusCodes.Deny)
+		}
+	}
+
+	t.Logf("%d of %d requests were challenged, %d were rejected", challenged, requests, denied)
+
+	if denied == 0 {
+		t.Fatalf("no request out of %d was rejected, the one in 64 gzip check never fired", requests)
+	}
+
+	const rejectionMessage = "client was given a challenge but does not in fact support gzip compression"
+
+	var logged int
+
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if !strings.Contains(line, rejectionMessage) {
+			continue
+		}
+
+		logged++
+
+		var record struct {
+			Level string `json:"level"`
+		}
+
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("can't parse log line %q: %v", line, err)
+		}
+
+		if record.Level != slog.LevelInfo.String() {
+			t.Errorf("rejection was logged at %s, wanted %s", record.Level, slog.LevelInfo)
+		}
+	}
+
+	if logged != denied {
+		t.Errorf("%d requests were rejected but %d rejections were logged", denied, logged)
+	}
+}
+
+func assertHeaderValues(t *testing.T, header http.Header, name string, want ...string) {
+	t.Helper()
+
+	got := header.Values(name)
+	if len(got) != len(want) {
+		t.Fatalf("header %s has values %q, wanted %q", name, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("header %s has values %q, wanted %q", name, got, want)
+		}
+	}
+}
+
+func TestDownstreamAnubisHeadersAreAuthoritative(t *testing.T) {
+	const attackerValue = "attacker-controlled"
+
+	t.Run("explicit allow", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			spoof bool
+		}{
+			{name: "ordinary request"},
+			{name: "spoofed headers", spoof: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var forwarded http.Header
+				srv := spawnAnubis(t, Options{
+					Next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						forwarded = r.Header.Clone()
+						w.WriteHeader(http.StatusNoContent)
+					}),
+					Policy: loadPolicies(t, "testdata/permissive.yaml", 4),
+				})
+
+				req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+				req.Header.Set("X-Real-IP", "127.0.0.1")
+				if tc.spoof {
+					req.Header["X-Anubis-Rule"] = []string{attackerValue, "second-attacker-value"}
+					req.Header["X-Anubis-Action"] = []string{attackerValue, "second-attacker-value"}
+					req.Header["X-Anubis-Status"] = []string{attackerValue, "second-attacker-value"}
+					req.Header.Set("Connection", "keep-alive, x-anubis-rule, X-Anubis-Status")
+				}
+
+				cr, _, err := srv.check(req, srv.logger)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				rr := httptest.NewRecorder()
+				srv.maybeReverseProxyOrPage(rr, req)
+
+				if forwarded == nil {
+					t.Fatal("request was not forwarded")
+				}
+				assertHeaderValues(t, forwarded, "X-Anubis-Rule", cr.Name)
+				assertHeaderValues(t, forwarded, "X-Anubis-Action", string(cr.Rule))
+				assertHeaderValues(t, forwarded, "X-Anubis-Status")
+				if tc.spoof {
+					assertHeaderValues(t, forwarded, "Connection", "keep-alive")
+				}
+			})
+		}
+	})
+}
+
 func TestCloudflareWorkersRule(t *testing.T) {
 	for _, variant := range []string{"cel", "header"} {
 		t.Run(variant, func(t *testing.T) {
 			pol := loadPolicies(t, "./testdata/cloudflare-workers-"+variant+".yaml", 0)
 
 			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				fmt.Fprintln(w, "OK")
+				fmt.Fprintln(w, "OK") //nolint:errcheck
 			})
 
 			s, err := New(Options{
@@ -680,7 +890,7 @@ func TestCloudflareWorkersRule(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				req.Header.Add("X-Real-Ip", "127.0.0.1")
+				req.Header.Add("X-Real-IP", "127.0.0.1")
 				req.Header.Add("Cf-Worker", "true")
 
 				cr, _, err := s.check(req, s.logger)
@@ -699,7 +909,7 @@ func TestCloudflareWorkersRule(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				req.Header.Add("X-Real-Ip", "127.0.0.1")
+				req.Header.Add("X-Real-IP", "127.0.0.1")
 
 				cr, _, err := s.check(req, s.logger)
 				if err != nil {
@@ -735,7 +945,7 @@ func TestRuleChange(t *testing.T) {
 	resp := handleChallengeZeroDifficulty(t, ts, cli, chall)
 
 	if resp.StatusCode != http.StatusFound {
-		resp.Write(os.Stderr)
+		_ = resp.Write(os.Stderr) // if stderr fails, there are bigger problems
 		t.Errorf("wanted %d, got: %d", http.StatusFound, resp.StatusCode)
 	}
 }
@@ -744,9 +954,9 @@ func TestStripBasePrefixFromRequest(t *testing.T) {
 	testCases := []struct {
 		name            string
 		basePrefix      string
-		stripBasePrefix bool
 		requestPath     string
 		expectedPath    string
+		stripBasePrefix bool
 	}{
 		{
 			name:            "strip disabled - no change",
@@ -863,7 +1073,11 @@ func TestChallengeFor_ErrNotFound(t *testing.T) {
 	srv.maybeReverseProxyOrPage(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
 
 	body := new(strings.Builder)
 	_, err := io.Copy(body, resp.Body)
@@ -890,7 +1104,7 @@ func TestChallengeFor_ErrNotFound(t *testing.T) {
 	t.Run("make sure new test cookie is issued", func(t *testing.T) {
 		found := false
 		for _, cookie := range resp.Cookies() {
-			if cookie.Name == anubis.TestCookieName {
+			if cookie.Name == srv.cookieName(anubis.TestCookieName) {
 				if cookie.Value == wrongCookie {
 					t.Error("a new challenge cookie should be issued")
 				}
@@ -1027,10 +1241,348 @@ func TestPassChallengeXSS(t *testing.T) {
 	})
 }
 
+// Regression test for https://github.com/TecharoHQ/anubis/issues/1596: the Referer
+// header a visitor arrived with (e.g. an external social/referral link) must survive
+// the challenge round trip instead of being replaced by the internal challenge page
+// as the apparent referrer once the request reaches the upstream origin.
+func TestPassChallengeRestoresOriginalReferer(t *testing.T) {
+	const originalReferer = "https://example-external.test/some/post?utm=abc"
+
+	var forwarded []string
+	srv := spawnAnubis(t, Options{
+		Next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			forwarded = append(forwarded, r.Header.Get("Referer"))
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		Policy:           loadPolicies(t, "testdata/zero_difficulty.yaml", 0),
+		CookieExpiration: 10 * time.Minute,
+	})
+
+	ts := httptest.NewServer(internal.RemoteXRealIP(true, "tcp", srv))
+	defer ts.Close()
+
+	cli := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	// The visitor arrives from an external site and gets challenged.
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/.within.website/x/cmd/anubis/api/make-challenge", nil)
+	if err != nil {
+		t.Fatalf("can't make request: %v", err)
+	}
+	req.Header.Set("Referer", originalReferer)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	q := req.URL.Query()
+	q.Set("redir", "/")
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := cli.Do(req)
+	if err != nil {
+		t.Fatalf("can't request challenge: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	var chall challengeResp
+	if err := json.NewDecoder(resp.Body).Decode(&chall); err != nil {
+		t.Fatalf("can't decode challenge: %v", err)
+	}
+
+	var testCookie *http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == srv.cookieName(anubis.TestCookieName) {
+			testCookie = c
+		}
+	}
+	if testCookie == nil {
+		t.Fatal("make-challenge did not set the verification cookie")
+	}
+
+	// Solve the (zero-difficulty) challenge and pass it.
+	nonce := 0
+	calculated := internal.SHA256sum(fmt.Sprintf("%s%d", chall.Challenge, nonce))
+
+	passReq, err := http.NewRequest(http.MethodGet, ts.URL+"/.within.website/x/cmd/anubis/api/pass-challenge", nil)
+	if err != nil {
+		t.Fatalf("can't make request: %v", err)
+	}
+	passReq.Header.Set("User-Agent", "Mozilla/5.0")
+	passReq.AddCookie(testCookie)
+	pq := passReq.URL.Query()
+	pq.Set("response", calculated)
+	pq.Set("nonce", fmt.Sprint(nonce))
+	pq.Set("redir", "/")
+	pq.Set("elapsedTime", "420")
+	pq.Set("id", chall.ID)
+	passReq.URL.RawQuery = pq.Encode()
+
+	passResp, err := cli.Do(passReq)
+	if err != nil {
+		t.Fatalf("can't do request: %v", err)
+	}
+	defer passResp.Body.Close() //nolint:errcheck
+
+	if passResp.StatusCode != http.StatusFound {
+		body, _ := io.ReadAll(passResp.Body)
+		t.Fatalf("wanted %d from pass-challenge, got %d: %s", http.StatusFound, passResp.StatusCode, body)
+	}
+
+	var authCookie, relayCookie *http.Cookie
+	for _, c := range passResp.Cookies() {
+		switch c.Name {
+		case srv.cookieName(anubis.CookieName):
+			authCookie = c
+		case srv.cookieName(originalRefererCookieName):
+			relayCookie = c
+		}
+	}
+	if authCookie == nil {
+		t.Fatal("pass-challenge did not set the auth cookie")
+	}
+	if relayCookie == nil {
+		t.Fatal("pass-challenge did not set the original referer relay cookie")
+	}
+	if want := url.QueryEscape(originalReferer); relayCookie.Value != want {
+		t.Errorf("wanted relay cookie value %q, got %q", want, relayCookie.Value)
+	}
+
+	location := passResp.Header.Get("Location")
+	if location == "" {
+		t.Fatal("pass-challenge did not return a redirect Location")
+	}
+
+	// This simulates the browser's follow-up navigation to the real page. A real
+	// browser sends the challenge page itself as Referer here (same-site redirect);
+	// use that misleading value to prove Anubis overrides it with the true original
+	// referrer rather than just forwarding whatever the browser happened to send.
+	followReq, err := http.NewRequest(http.MethodGet, ts.URL+location, nil)
+	if err != nil {
+		t.Fatalf("can't make request: %v", err)
+	}
+	followReq.Header.Set("User-Agent", "Mozilla/5.0")
+	followReq.Header.Set("Referer", ts.URL+"/.within.website/x/cmd/anubis/api/pass-challenge")
+	followReq.AddCookie(authCookie)
+	followReq.AddCookie(relayCookie)
+
+	followResp, err := cli.Do(followReq)
+	if err != nil {
+		t.Fatalf("can't do request: %v", err)
+	}
+	defer followResp.Body.Close() //nolint:errcheck
+
+	if len(forwarded) != 1 {
+		t.Fatalf("wanted exactly one proxied request, got %d", len(forwarded))
+	}
+	if forwarded[0] != originalReferer {
+		t.Errorf("wanted upstream Referer %q, got %q", originalReferer, forwarded[0])
+	}
+
+	var relayCleared bool
+	for _, c := range followResp.Cookies() {
+		if c.Name == srv.cookieName(originalRefererCookieName) && c.MaxAge < 0 {
+			relayCleared = true
+		}
+	}
+	if !relayCleared {
+		t.Error("wanted the original referer relay cookie to be cleared after use")
+	}
+
+	// A later, ordinary navigation doesn't carry the (already consumed) relay cookie,
+	// so its own Referer must pass through untouched.
+	nextReferer := "https://example.test/some-other-internal-page"
+	nextReq, err := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+	if err != nil {
+		t.Fatalf("can't make request: %v", err)
+	}
+	nextReq.Header.Set("User-Agent", "Mozilla/5.0")
+	nextReq.Header.Set("Referer", nextReferer)
+	nextReq.AddCookie(authCookie)
+
+	nextResp, err := cli.Do(nextReq)
+	if err != nil {
+		t.Fatalf("can't do request: %v", err)
+	}
+	defer nextResp.Body.Close() //nolint:errcheck
+
+	if len(forwarded) != 2 {
+		t.Fatalf("wanted exactly two proxied requests total, got %d", len(forwarded))
+	}
+	if forwarded[1] != nextReferer {
+		t.Errorf("wanted upstream Referer %q on subsequent request, got %q", nextReferer, forwarded[1])
+	}
+}
+
+// document.referrer itself can't be fixed (it's the browser's own record of the
+// challenge-page navigation, not something a proxy or script can override), so
+// withRefererAttributionQuery is the opt-in fallback: it hands the original
+// referrer's host to the destination page via utm_source/utm_medium, which
+// client-side analytics tools such as Plausible read instead of
+// document.referrer when present.
+func TestWithRefererAttributionQuery(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		enabled     bool
+		redir       string
+		origReferer string
+		host        string
+		want        string
+	}{
+		{
+			name:        "disabled leaves redir untouched",
+			enabled:     false,
+			redir:       "/page",
+			origReferer: "https://example-external.test/post",
+			host:        "site.tld",
+			want:        "/page",
+		},
+		{
+			name:    "no captured referer leaves redir untouched",
+			enabled: true,
+			redir:   "/page",
+			host:    "site.tld",
+			want:    "/page",
+		},
+		{
+			name:        "same-site referer leaves redir untouched",
+			enabled:     true,
+			redir:       "/page",
+			origReferer: "https://site.tld/other-page",
+			host:        "site.tld",
+			want:        "/page",
+		},
+		{
+			name:        "unparseable referer leaves redir untouched",
+			enabled:     true,
+			redir:       "/page",
+			origReferer: "://not a url",
+			host:        "site.tld",
+			want:        "/page",
+		},
+		{
+			name:        "external referer with no existing query gets utm params",
+			enabled:     true,
+			redir:       "/page",
+			origReferer: "https://example-external.test/some/post",
+			host:        "site.tld",
+			want:        "/page?utm_medium=referral&utm_source=example-external.test",
+		},
+		{
+			name:        "existing unrelated query is preserved alongside new params",
+			enabled:     true,
+			redir:       "/page?foo=bar",
+			origReferer: "https://example-external.test/some/post",
+			host:        "site.tld",
+			want:        "/page?foo=bar&utm_medium=referral&utm_source=example-external.test",
+		},
+		{
+			name:        "existing utm_source is not clobbered",
+			enabled:     true,
+			redir:       "/page?utm_source=newsletter",
+			origReferer: "https://example-external.test/some/post",
+			host:        "site.tld",
+			want:        "/page?utm_source=newsletter",
+		},
+		{
+			name:        "existing ref param is not clobbered",
+			enabled:     true,
+			redir:       "/page?ref=already-set",
+			origReferer: "https://example-external.test/some/post",
+			host:        "site.tld",
+			want:        "/page?ref=already-set",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := &Server{opts: Options{PreserveRefererQueryParam: tc.enabled}}
+
+			got := srv.withRefererAttributionQuery(tc.redir, tc.origReferer, tc.host)
+			if got != tc.want {
+				t.Errorf("wanted %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestPassChallengeNilRuleChallengeFallback(t *testing.T) {
+	pol := loadPolicies(t, "testdata/zero_difficulty.yaml", 0)
+
+	srv := spawnAnubis(t, Options{
+		Next:            http.NewServeMux(),
+		Policy:          pol,
+		RedirectDomains: []string{"allowed.example"},
+	})
+
+	allowThreshold, err := policy.ParsedThresholdFromConfig(config.Threshold{
+		Name: "allow-all",
+		Expression: &config.ExpressionOrList{
+			Expression: "true",
+		},
+		Action: config.RuleAllow,
+	})
+	if err != nil {
+		t.Fatalf("can't compile test threshold: %v", err)
+	}
+	srv.policy.Thresholds = []*policy.Threshold{allowThreshold}
+	srv.policy.Bots = nil
+
+	chall := challenge.Challenge{
+		ID:         "test-challenge",
+		Method:     "metarefresh",
+		RandomData: "apple cider",
+		IssuedAt:   time.Now().Add(-5 * time.Second),
+		Difficulty: 1,
+	}
+
+	j := store.JSON[challenge.Challenge]{Underlying: srv.store}
+	if err := j.Set(context.Background(), "challenge:"+chall.ID, chall, time.Minute); err != nil {
+		t.Fatalf("can't insert challenge into store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com"+anubis.APIPrefix+"pass-challenge", nil)
+	q := req.URL.Query()
+	q.Set("redir", "/")
+	q.Set("id", chall.ID)
+	q.Set("challenge", chall.RandomData)
+	req.URL.RawQuery = q.Encode()
+	req.Header.Set("X-Real-IP", "203.0.113.4")
+	req.Header.Set("User-Agent", "NilChallengeTester/1.0")
+	req.AddCookie(&http.Cookie{Name: srv.cookieName(anubis.TestCookieName), Value: chall.ID})
+
+	for _, target := range []string{"https:///evil.com/", "https://evil.com/", "//evil.com", `/\evil.com`} {
+		badReq := req.Clone(req.Context())
+		badQuery := badReq.URL.Query()
+		badQuery.Set("redir", target)
+		badReq.URL.RawQuery = badQuery.Encode()
+		badResponse := httptest.NewRecorder()
+		srv.PassChallenge(badResponse, badReq)
+		if badResponse.Code != http.StatusBadRequest || badResponse.Header().Get("Location") != "" || len(badResponse.Result().Cookies()) != 0 {
+			t.Fatalf("invalid target %q: got %d, %v", target, badResponse.Code, badResponse.Header())
+		}
+		stored, err := j.Get(req.Context(), "challenge:"+chall.ID)
+		if err != nil || stored.Spent {
+			t.Fatalf("invalid redirect changed challenge state: spent=%v, err=%v", stored.Spent, err)
+		}
+	}
+	const target = "https://allowed.example/safe%2Fpath?q=%2F%2Fevil.com#fragment"
+	q.Set("redir", target)
+	req.URL.RawQuery = q.Encode()
+
+	rr := httptest.NewRecorder()
+
+	srv.PassChallenge(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected redirect when validating challenge, got %d", rr.Code)
+	}
+	if rr.Header().Get("Location") != target {
+		t.Fatalf("unexpected Location: %q", rr.Header().Get("Location"))
+	}
+}
+
 func TestXForwardedForNoDoubleComma(t *testing.T) {
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
-		fmt.Fprintln(w, "OK")
+		fmt.Fprintln(w, "OK") //nolint:errcheck
 	})
 
 	h = internal.XForwardedForToXRealIP(h)
@@ -1050,7 +1602,7 @@ func TestXForwardedForNoDoubleComma(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Set("X-Real-Ip", "10.0.0.1")
+	req.Header.Set("X-Real-IP", "10.0.0.1")
 
 	resp, err := ts.Client().Do(req)
 	if err != nil {
