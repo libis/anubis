@@ -20,11 +20,26 @@ Anubis is brought to you by sponsors and donors like:
 <a href="https://www.raptorcs.com/content/base/products.html">
   <img src="./docs/static/img/sponsors/raptor-computing-logo.webp" alt="Raptor Computing Systems" height=64 />
 </a>
+<a href="https://databento.com/?utm_source=anubis&utm_medium=sponsor&utm_campaign=anubis">
+  <img src="./docs/static/img/sponsors/databento-logo.webp" alt="Databento" height="64" />
+</a>
+<a href="https://spur.us/?utm_source=github&utm_medium=referral&utm_campaign=anubis-readme">
+  <img src="./docs/static/img/sponsors/spur-logo.webp" alt="Spur Intelligence" height="64">
+</a>
 
 ### Gold Tier
 
-<a href="https://distrust.co?utm_campaign=github&utm_medium=referral&utm_content=anubis">
-  <img src="./docs/static/img/sponsors/distrust-logo.webp" alt="Distrust" height="64">
+<a href="https://www.unipromos.com/?utm_campaign=github&utm_medium=referral&utm_content=anubis">
+  <img src="./docs/static/img/sponsors/unipromos.webp" alt="Unipromos" height="64" />
+</a>
+<a href="https://uvensys.de/?utm_campaign=github&utm_medium=referral&utm_content=anubis">
+  <img src="./docs/static/img/sponsors/uvensys.webp" alt="Uvensys" height="64">
+</a>
+<a href="https://about.gitea.com?utm_campaign=github&utm_medium=referral&utm_content=anubis">
+  <img src="./docs/static/img/sponsors/gitea-logo.webp" alt="Gitea" height="64">
+</a>
+<a href="https://prolocation.net?utm_campaign=github&utm_medium=referral&utm_content=anubis">
+  <img src="./docs/static/img/sponsors/prolocation-logo.svg" alt="Prolocation" height="64">
 </a>
 <a href="https://terminaltrove.com/?utm_campaign=github&utm_medium=referral&utm_content=anubis&utm_source=abgh">
   <img src="./docs/static/img/sponsors/terminal-trove.webp" alt="Terminal Trove" height="64">
@@ -48,12 +63,24 @@ Anubis is brought to you by sponsors and donors like:
     height="64"
   />
 </a>
-<a href="https://fabulous.systems/">
+<a href="https://felsqualle.com">
   <img
-    src="./docs/static/img/sponsors/fabulous-systems.webp"
-    alt="Cat eyes over the word Emma in a serif font"
+    src="./docs/static/img/sponsors/felsqualle-logo.webp"
+    alt="The word felsqualle in dripping pixel-art letters"
     height="64"
   />
+</a>
+<a href="https://www.anexia.com/">
+  <img src="./docs/static/img/sponsors/anexia-cloudsolutions-logo.webp" alt="ANEXIA Cloud Solutions" height="64">
+</a>
+<a href="https://dd-wrt.com/">
+  <img src="./docs/static/img/sponsors/ddwrt-logo.webp" alt="embeDD GmbH" height="64">
+</a>
+<a href="https://www.qwertiko.de?utm_campaign=github&utm_medium=referral&utm_content=anubis">
+  <img src="./docs/static/img/sponsors/qwertiko-logo.webp" alt="Qwertiko" height="64">
+</a>
+<a href="https://wenet.pl/?utm_campaign=github&utm_medium=referral&utm_content=anubis">
+  <img src="./docs/static/img/sponsors/wenet-logo.webp" alt="Wenet" height="64">
 </a>
 
 ## Overview
@@ -66,7 +93,7 @@ Anubis is a bit of a nuclear response. This will result in your website being bl
 
 In most cases, you should not need this and can probably get by using Cloudflare to protect a given origin. However, for circumstances where you can't or won't use Cloudflare, Anubis is there for you.
 
-If you want to try this out, connect to [anubis.techaro.lol](https://anubis.techaro.lol).
+If you want to try this out, visit the Anubis documentation site at [anubis.techaro.lol](https://anubis.techaro.lol).
 
 ## Support
 
@@ -76,11 +103,11 @@ For live chat, please join the [Patreon](https://patreon.com/cadey) and ask in t
 
 ## Star History
 
-<a href="https://www.star-history.com/#TecharoHQ/anubis&Date">
+<a href="https://www.star-history.com/?type=date&repos=TecharoHQ%2Fanubis">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=TecharoHQ/anubis&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=TecharoHQ/anubis&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=TecharoHQ/anubis&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=TecharoHQ/anubis&type=date&theme=dark&legend=top-left&sealed_token=NijaGjH7lyOz9iUXAO-9vs88h2o0C6cmPKIfKSpvhUrnzP0KtL93_9gsGM0D66Miq8f1b9cynl8o1of6EhFiUQK-uBZqAQqxs6dhM8tcb5Q-YTicObjlrv5RpQUkEu0nVRJ6eoU208uQzm0yNfeOkMcBgvxqPmSVdoUTNB3wjfJodZlPzopX7oVp3aXO" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=TecharoHQ/anubis&type=date&legend=top-left&sealed_token=NijaGjH7lyOz9iUXAO-9vs88h2o0C6cmPKIfKSpvhUrnzP0KtL93_9gsGM0D66Miq8f1b9cynl8o1of6EhFiUQK-uBZqAQqxs6dhM8tcb5Q-YTicObjlrv5RpQUkEu0nVRJ6eoU208uQzm0yNfeOkMcBgvxqPmSVdoUTNB3wjfJodZlPzopX7oVp3aXO" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=TecharoHQ/anubis&type=date&legend=top-left&sealed_token=NijaGjH7lyOz9iUXAO-9vs88h2o0C6cmPKIfKSpvhUrnzP0KtL93_9gsGM0D66Miq8f1b9cynl8o1of6EhFiUQK-uBZqAQqxs6dhM8tcb5Q-YTicObjlrv5RpQUkEu0nVRJ6eoU208uQzm0yNfeOkMcBgvxqPmSVdoUTNB3wjfJodZlPzopX7oVp3aXO" />
  </picture>
 </a>
 

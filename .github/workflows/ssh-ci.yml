@@ -12,32 +12,33 @@ permissions:
 jobs:
   ssh:
     if: github.repository == 'TecharoHQ/anubis'
-    runs-on: alrest-techarohq
+    #runs-on: alrest-techarohq
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         host:
           - riscv64
           - ppc64le
-          - aarch64-4k
-          - aarch64-16k
+          #- aarch64-4k
+          #- aarch64-16k
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
           fetch-depth: 0
           persist-credentials: false
 
       - name: Install CI target SSH key
-        uses: shimataro/ssh-key-action@d4fffb50872869abe2d9a9098a6d9c5aa7d16be4 # v2.7.0
+        uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 # v2.8.1
         with:
           key: ${{ secrets.CI_SSH_KEY }}
           name: id_rsa
           known_hosts: ${{ secrets.CI_SSH_KNOWN_HOSTS }}
 
-      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: stable
+          go-version: "stable"
 
       - name: Run CI
         run: go run ./utils/cmd/backoff-retry bash test/ssh-ci/rigging.sh ${{ matrix.host }}

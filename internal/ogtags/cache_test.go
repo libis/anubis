@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TecharoHQ/anubis/lib/policy/config"
+	"github.com/TecharoHQ/anubis/lib/config"
 	"github.com/TecharoHQ/anubis/lib/store"
 	"github.com/TecharoHQ/anubis/lib/store/memory"
 )
@@ -24,7 +24,7 @@ func TestCacheReturnsDefault(t *testing.T) {
 		TimeToLive:   time.Minute,
 		ConsiderHost: false,
 		Override:     want,
-	}, memory.New(t.Context()))
+	}, memory.New(t.Context()), TargetOptions{})
 
 	u, err := url.Parse("https://anubis.techaro.lol")
 	if err != nil {
@@ -52,7 +52,7 @@ func TestCheckCache(t *testing.T) {
 		Enabled:      true,
 		TimeToLive:   time.Minute,
 		ConsiderHost: false,
-	}, memory.New(t.Context()))
+	}, memory.New(t.Context()), TargetOptions{})
 
 	// Set up test data
 	urlStr := "http://example.com/page"
@@ -69,7 +69,9 @@ func TestCheckCache(t *testing.T) {
 	}
 
 	// Manually add to cache
-	cache.cache.Set(t.Context(), cacheKey, expectedTags, time.Minute)
+	if err := cache.cache.Set(t.Context(), cacheKey, expectedTags, time.Minute); err != nil {
+		t.Fatal(err)
+	}
 
 	// Test cache hit
 	tags = cache.checkCache(t.Context(), cacheKey)
@@ -94,6 +96,7 @@ func TestGetOGTags(t *testing.T) {
 			t.Fatalf("Test route loaded more than once, cache failed")
 		}
 		w.Header().Set("Content-Type", "text/html")
+		// nolint:errcheck
 		w.Write([]byte(`
 			<!DOCTYPE html>
 			<html>
@@ -115,7 +118,7 @@ func TestGetOGTags(t *testing.T) {
 		Enabled:      true,
 		TimeToLive:   time.Minute,
 		ConsiderHost: false,
-	}, memory.New(t.Context()))
+	}, memory.New(t.Context()), TargetOptions{})
 
 	// Parse the test server URL
 	parsedURL, err := url.Parse(ts.URL)
@@ -185,6 +188,7 @@ func TestGetOGTagsWithHostConsideration(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		loadCount++ // Increment counter on each request to the server
 		w.Header().Set("Content-Type", "text/html")
+		// nolint:errcheck
 		w.Write([]byte(`
 			<!DOCTYPE html>
 			<html>
@@ -271,7 +275,7 @@ func TestGetOGTagsWithHostConsideration(t *testing.T) {
 				Enabled:      true,
 				TimeToLive:   time.Minute,
 				ConsiderHost: tc.ogCacheConsiderHost,
-			}, memory.New(t.Context()))
+			}, memory.New(t.Context()), TargetOptions{})
 
 			for i, req := range tc.requests {
 				ogTags, err := cache.GetOGTags(t.Context(), parsedURL, req.host)

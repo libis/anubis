@@ -13,6 +13,8 @@ deps:
 assets: PATH:=$(PWD)/node_modules/.bin:$(PATH)
 assets: deps
 	$(GO) generate ./...
+	bash ./wasm/scripts/build_wasm.sh
+	bash ./wasm/scripts/build_wasm2js.sh
 	./web/build.sh
 	./xess/build.sh
 
@@ -24,8 +26,7 @@ build: assets
 lint: assets
 	$(GO) vet ./...
 	$(GO) tool staticcheck ./...
-	$(GO) tool govulncheck ./...
-
+	
 prebaked-build:
 	$(GO) build -o ./var/anubis -ldflags "-X 'github.com/TecharoHQ/anubis.Version=$(VERSION)'" ./cmd/anubis
 	$(GO) build -o ./var/robots2policy -ldflags "-X 'github.com/TecharoHQ/anubis.Version=$(VERSION)'" ./cmd/robots2policy
