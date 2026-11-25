@@ -31,6 +31,20 @@ var (
 	ErrTooMuchData   = errors.New("wasm: too much data being written")
 )
 
+var verificationSlots = make(chan struct{}, 4)
+
+func acquireVerification(ctx context.Context) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case verificationSlots <- struct{}{}:
+		return func() { <-verificationSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 const pageSize = 65536
 
 type Runner struct {
@@ -256,7 +270,9 @@ func (r *Runner) Run(ctx context.Context, data []byte, difficulty, initialNonce,
 }
 
 func (r *Runner) verify(ctx context.Context, data, verify []byte, nonce, difficulty uint32) (bool, api.Module, error) {
-	mod, err := r.r.InstantiateModule(ctx, r.code, wazero.NewModuleConfig().WithName(r.fname))
+	// Verify permits multiple in-flight calls, so each transient module must be anonymous.
+	// wazero rejects a second live module registered under the same non-empty name.
+	mod, err := r.r.InstantiateModule(ctx, r.code, wazero.NewModuleConfig().WithName(""))
 	if err != nil {
 		return false, nil, fmt.Errorf("can't instantiate module: %w", err)
 	}
@@ -282,6 +298,11 @@ func (r *Runner) verify(ctx context.Context, data, verify []byte, nonce, difficu
 }
 
 func (r *Runner) Verify(ctx context.Context, data, verify []byte, nonce, difficulty uint32) (bool, error) {
+	release, err := acquireVerification(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer release()
 	t0 := time.Now()
 	ok, mod, err := r.verify(ctx, data, verify, nonce, difficulty)
 	if mod != nil {

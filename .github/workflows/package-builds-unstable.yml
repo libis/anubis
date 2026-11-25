@@ -12,8 +12,8 @@ permissions:
 
 jobs:
   package_builds:
-    #runs-on: alrest-techarohq
-    runs-on: ubuntu-24.04
+    runs-on: saga-techaro
+    #runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -24,7 +24,11 @@ jobs:
       - name: build essential
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential
+          sudo apt-get install -y build-essential brotli zstd
+
+      - name: Set up Homebrew
+        run: |
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
       # Ubuntu 24.04 ships wixl 0.103, which aborts on the Component Condition
       # in run/windows/anubis.wxs ("unhandled child Component node Condition").
@@ -45,7 +49,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "stable"
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache: false
           target: wasm32-unknown-unknown

@@ -28,7 +28,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "stable"
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache: false
           target: wasm32-unknown-unknown
@@ -58,6 +58,15 @@ jobs:
       - name: Run asset build
         run: |
           npm run assets
+
+      - name: Verify strict MVP WebAssembly artifacts
+        run: go test ./wasm -run '^TestMVP(Artifacts|ValidatorRejectsExtensions)$' -count=1 -v
+
+      - name: Install Chromium for WebAssembly selection tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Test WebAssembly selection and compilation fallback
+        run: npm run test:wasm-frontend
 
       - name: Check for uncommitted changes after asset build
         id: check-changes-after

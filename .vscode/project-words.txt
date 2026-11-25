@@ -55,6 +55,7 @@ blueskybot
 boi
 Bokm
 Bokmål
+botgenerate
 botnet
 botstopper
 BPort
@@ -72,6 +73,7 @@ caninetools
 canonialheader
 Cardyb
 CAs
+cdylib
 celchecker
 celphase
 cerr
@@ -95,7 +97,9 @@ CLAUDE
 cloudflare
 cloudsolutions
 Codespaces
+commoncrawl
 confd
+configmap
 containerbuild
 containerregistry
 cooldown
@@ -107,6 +111,7 @@ crt
 Cscript
 csdl
 cssload
+CSSURL
 Ctarget
 CUDA
 dacl
@@ -148,6 +153,7 @@ dsilence
 duckduckbot
 echaro
 eerror
+elif
 ellenjoe
 emacs
 embe
@@ -193,6 +199,7 @@ forwardauth
 fout
 fpcast
 fptoint
+freelist
 fsys
 fucky
 fullchain
@@ -204,6 +211,8 @@ gdead
 gdeadbee
 geoip
 geoipchecker
+geoiptest
+geoipupdate
 gha
 GHSA
 Ghz
@@ -265,6 +274,7 @@ iaso
 iat
 icacls
 ifm
+imafdcsu
 Imagesift
 imgproxy
 impressum
@@ -276,6 +286,7 @@ installdir
 INSTALLDIR
 internets
 iocaine
+IPASN
 iplist
 IPTo
 iptoasn
@@ -329,6 +340,8 @@ Lyrenth
 MAINT
 maintnotifications
 malware
+maxmind
+maxminddb
 mba
 mcr
 memes
@@ -339,6 +352,10 @@ Minfilia
 minica
 mistralai
 mkmsi
+mmaps
+mmdb
+mmdbtype
+mmdbwriter
 mnt
 Moenbryda
 Mojeek
@@ -354,6 +371,7 @@ msiinfo
 msitools
 msiversion
 mtimes
+mudhra
 multicore
 multifile
 multisite
@@ -391,6 +409,7 @@ openai
 opendns
 opengraph
 openrc
+oschwald
 oswald
 packagecode
 pag
@@ -485,7 +504,9 @@ shirou
 shoneypot
 shopt
 Sidetrade
+signext
 simprint
+Siri
 sitemap
 sloglint
 slogt
@@ -493,6 +514,7 @@ sls
 sni
 snipster
 sortorder
+soteria
 Spambot
 spammer
 sparkline
@@ -516,12 +538,15 @@ subgrid
 subjobs
 subr
 subrequest
+subrequests
 subresource
 subtest
 suminfo
 svcctl
 SVCNAME
+synthient
 sysext
+sysusers
 tagline
 tarballs
 TARGETDIR
@@ -537,12 +562,14 @@ templ
 templruntime
 tencent
 testarea
+tetratelabs
 Thancred
 thoth
 thothmock
 Tik
 Timpibot
 TLog
+tmpfiles
 toplevel
 Totolymo
 traefik
@@ -553,11 +580,14 @@ uberspace
 ubuntu
 Unbreak
 unbreakdocker
+Uncacheable
 unfeatures
 unifiedjs
+uninlined
 unintrusive
 unipromos
 unixhttpd
+unmaps
 unmarshal
 unmarshals
 unparseable
@@ -567,6 +597,7 @@ untee
 updown
 uppercased
 uppercases
+URLHTTP
 urlsafe
 usecase
 usecases
@@ -630,6 +661,7 @@ xxhash
 Y'shtola
 yae
 YAMLTo
+yandexbot
 Yavascript
 Yda
 yeet
